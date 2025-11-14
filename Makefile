@@ -15,6 +15,10 @@ publish: dist hashgen
 
 local:
 	CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o bin/faasd
+	
+.PHONY: clean
+clean:
+	rm -f bin/faasd*
 
 .PHONY: test
 test:
