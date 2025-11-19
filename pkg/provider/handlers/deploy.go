@@ -236,7 +236,7 @@ func createTask(ctx context.Context, container containerd.Container, cni gocni.C
 		return fmt.Errorf("unable to start task: %s, error: %w", name, taskErr)
 	}
 
-	log.Printf("Container ID: %s\tTask ID %s:\tTask PID: %d\t\n", name, task.ID(), task.Pid())
+	log.Printf("Container ID: %s\tTask ID: %s\tTask PID: %d\t\n", name, task.ID(), task.Pid())
 
 	labels := map[string]string{}
 	_, err := cninetwork.CreateCNINetwork(ctx, cni, task, labels)
