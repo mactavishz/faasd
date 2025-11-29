@@ -341,13 +341,5 @@ func withMemory(mem *specs.LinuxMemory) oci.SpecOpts {
 func preDeploy(client *containerd.Client, additional int64) error {
 	count, countNs, err := countFunctions(client)
 	log.Printf("Function count: %d, Namespace count: %d\n", count, countNs)
-
-	if err != nil {
-		return err
-	} else if count+additional > faasdMaxFunctions {
-		return fmt.Errorf("the OpenFaaS CE EULA allows %d/%d function(s), upgrade to faasd Pro to continue", faasdMaxFunctions, count+additional)
-	} else if countNs > faasdMaxNs {
-		return fmt.Errorf("the OpenFaaS CE EULA allows %d/%d namespace(s), upgrade to faasd Pro to continue", faasdMaxNs, countNs)
-	}
-	return nil
+	return err
 }

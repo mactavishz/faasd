@@ -42,6 +42,3 @@ func MakeInfoHandler(version, sha string) http.HandlerFunc {
 		w.Write(jsonOut)
 	}
 }
-
-const faasdMaxFunctions = 15
-const faasdMaxNs = 1

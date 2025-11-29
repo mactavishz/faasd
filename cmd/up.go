@@ -207,8 +207,7 @@ func parseUpFlags(cmd *cobra.Command) (upConfig, error) {
 
 func preRunE(cmd *cobra.Command, _ []string) error {
 	if err := pkg.ConnectivityCheck(); err != nil {
-		return fmt.Errorf("the OpenFaaS CE EULA requires Internet access, upgrade to faasd Pro to continue")
+		log.Println("no public Internet access")
 	}
-
 	return nil
 }
