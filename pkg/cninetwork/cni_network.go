@@ -109,7 +109,7 @@ func InitNetwork() (gocni.CNI, error) {
 }
 
 // CreateCNINetwork creates a CNI network interface and attaches it to the context
-func CreateCNINetwork(ctx context.Context, cni gocni.CNI, task containerd.Task, labels map[string]string) (*gocni.CNIResult, error) {
+func CreateCNINetwork(ctx context.Context, cni gocni.CNI, task containerd.Task, labels map[string]string) (*gocni.Result, error) {
 	id := netID(task)
 	netns := netNamespace(task)
 	result, err := cni.Setup(ctx, id, netns, gocni.WithLabels(labels))
