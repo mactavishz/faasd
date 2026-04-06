@@ -22,6 +22,9 @@ import (
 // dockerConfigDir contains "config.json"
 const dockerConfigDir = "/var/lib/faasd/.docker/"
 
+// this is only used for testing and development, so we can specify additional registries that should be accessed over plain HTTP (without TLS)
+const plainHTTPRegistriesEnvVar = "FAASD_PLAIN_HTTP_REGISTRIES"
+
 // Remove removes a container
 func Remove(ctx context.Context, client *containerd.Client, name string) error {
 
@@ -136,46 +139,95 @@ func killTask(ctx context.Context, task containerd.Task, gracePeriod time.Durati
 }
 
 func getResolver(configFile *configfile.ConfigFile) (remotes.Resolver, error) {
-	// credsFunc is based on https://github.com/moby/buildkit/blob/0b130cca040246d2ddf55117eeff34f546417e40/session/auth/authprovider/authprovider.go#L35
-	credFunc := func(host string) (string, string, error) {
-		if host == "registry-1.docker.io" {
-			host = "https://index.docker.io/v1/"
-		}
-		ac, err := configFile.GetAuthConfig(host)
-		if err != nil {
-			return "", "", err
-		}
-		if ac.IdentityToken != "" {
-			return "", ac.IdentityToken, nil
-		}
-		return ac.Username, ac.Password, nil
+	registryOpts := []docker.RegistryOpt{
+		docker.WithPlainHTTP(makePlainHTTPMatcher(parsePlainHTTPRegistries())),
 	}
 
-	authOpts := []docker.AuthorizerOpt{docker.WithAuthCreds(credFunc)}
-	authorizer := docker.NewDockerAuthorizer(authOpts...)
+	if configFile != nil {
+		// credsFunc is based on https://github.com/moby/buildkit/blob/0b130cca040246d2ddf55117eeff34f546417e40/session/auth/authprovider/authprovider.go#L35
+		credFunc := func(host string) (string, string, error) {
+			if host == "registry-1.docker.io" {
+				host = "https://index.docker.io/v1/"
+			}
+			ac, err := configFile.GetAuthConfig(host)
+			if err != nil {
+				return "", "", err
+			}
+			if ac.IdentityToken != "" {
+				return "", ac.IdentityToken, nil
+			}
+			return ac.Username, ac.Password, nil
+		}
+
+		authOpts := []docker.AuthorizerOpt{docker.WithAuthCreds(credFunc)}
+		authorizer := docker.NewDockerAuthorizer(authOpts...)
+		registryOpts = append(registryOpts, docker.WithAuthorizer(authorizer))
+	}
+
 	opts := docker.ResolverOptions{
-		Hosts: docker.ConfigureDefaultRegistries(docker.WithAuthorizer(authorizer)),
+		Hosts: docker.ConfigureDefaultRegistries(registryOpts...),
 	}
 	return docker.NewResolver(opts), nil
 }
 
+func parsePlainHTTPRegistries() map[string]struct{} {
+	hosts := map[string]struct{}{}
+
+	for _, item := range strings.Split(os.Getenv(plainHTTPRegistriesEnvVar), ",") {
+		host := strings.ToLower(strings.TrimSpace(item))
+		host = strings.TrimPrefix(host, "http://")
+		host = strings.TrimPrefix(host, "https://")
+		host = strings.TrimSuffix(host, "/")
+		if host == "" {
+			continue
+		}
+
+		hosts[host] = struct{}{}
+	}
+
+	return hosts
+}
+
+func makePlainHTTPMatcher(extraHosts map[string]struct{}) func(string) (bool, error) {
+	return func(host string) (bool, error) {
+		match, err := docker.MatchLocalhost(host)
+		if err != nil {
+			return false, err
+		}
+		if match {
+			return true, nil
+		}
+
+		normalized := strings.ToLower(strings.TrimSpace(host))
+		normalized = strings.TrimPrefix(normalized, "http://")
+		normalized = strings.TrimPrefix(normalized, "https://")
+		normalized = strings.TrimSuffix(normalized, "/")
+
+		_, ok := extraHosts[normalized]
+		return ok, nil
+	}
+}
+
 func PrepareImage(ctx context.Context, client *containerd.Client, imageName, snapshotter string, pullAlways bool) (containerd.Image, error) {
 	var (
-		empty    containerd.Image
-		resolver remotes.Resolver
+		empty      containerd.Image
+		resolver   remotes.Resolver
+		configFile *configfile.ConfigFile
 	)
 
 	if _, statErr := os.Stat(filepath.Join(dockerConfigDir, config.ConfigFileName)); statErr == nil {
-		configFile, err := config.Load(dockerConfigDir)
+		loadedConfig, err := config.Load(dockerConfigDir)
 		if err != nil {
 			return nil, err
 		}
-		resolver, err = getResolver(configFile)
-		if err != nil {
-			return empty, err
-		}
+		configFile = loadedConfig
 	} else if !os.IsNotExist(statErr) {
 		return empty, statErr
+	}
+
+	resolver, err := getResolver(configFile)
+	if err != nil {
+		return empty, err
 	}
 
 	var image containerd.Image
