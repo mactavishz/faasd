@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd"
@@ -26,7 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-const annotationLabelPrefix = "com.openfaas.annotations."
+const (
+	annotationLabelPrefix          = "com.openfaas.annotations."
+	defaultCPUCFSPeriodMicrosecond = uint64(100000)
+)
 
 // MakeDeployHandler returns a handler to deploy a function
 func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) func(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +165,14 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 		memory.Limit = &v
 	}
 
+	var cpu *specs.LinuxCPU
+	if req.Limits != nil && len(strings.TrimSpace(req.Limits.CPU)) > 0 {
+		cpu, err = buildCPULimit(req.Limits.CPU)
+		if err != nil {
+			log.Printf("error parsing (%q) as CPU limit: %s", req.Limits.CPU, err.Error())
+		}
+	}
+
 	container, err := client.NewContainer(
 		ctx,
 		name,
@@ -171,7 +184,8 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 			oci.WithCapabilities([]string{"CAP_NET_RAW"}),
 			oci.WithMounts(mounts),
 			oci.WithEnv(envs),
-			withMemory(memory)),
+			withMemory(memory),
+			withCPU(cpu)),
 		containerd.WithContainerLabels(labels),
 	)
 
@@ -320,6 +334,69 @@ func validateSecrets(secretMountPath string, secrets []string) error {
 	return nil
 }
 
+func buildCPULimit(value string) (*specs.LinuxCPU, error) {
+	nano, err := parseCPUNano(value)
+	if err != nil {
+		return nil, err
+	}
+
+	if nano <= 0 {
+		return nil, nil
+	}
+
+	period := defaultCPUCFSPeriodMicrosecond
+	periodInt64 := int64(period)
+
+	// Convert NanoCPUs to CFS quota/period used by OCI runtimes.
+	quota := (nano/1_000_000_000)*periodInt64 + ((nano%1_000_000_000)*periodInt64)/1_000_000_000
+	if quota < 1 {
+		quota = 1
+	}
+
+	return &specs.LinuxCPU{
+		Quota:  &quota,
+		Period: &period,
+	}, nil
+}
+
+func parseCPUNano(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("cpu is empty")
+	}
+
+	if milliStr, ok := strings.CutSuffix(s, "m"); ok {
+		r, ok := new(big.Rat).SetString(milliStr)
+		if !ok {
+			return 0, fmt.Errorf("invalid cpu value: %q", s)
+		}
+
+		r.Mul(r, big.NewRat(1_000_000, 1))
+		return ratToInt64(r, "cpu")
+	}
+
+	r, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return 0, fmt.Errorf("invalid cpu value: %q", s)
+	}
+
+	r.Mul(r, big.NewRat(1_000_000_000, 1))
+	return ratToInt64(r, "cpu")
+}
+
+func ratToInt64(r *big.Rat, field string) (int64, error) {
+	if r.Sign() < 0 {
+		return 0, fmt.Errorf("%s must be non-negative", field)
+	}
+
+	i := new(big.Int).Quo(r.Num(), r.Denom())
+	if !i.IsInt64() {
+		return 0, fmt.Errorf("%s value overflows int64", field)
+	}
+
+	return i.Int64(), nil
+}
+
 func withMemory(mem *specs.LinuxMemory) oci.SpecOpts {
 	return func(ctx context.Context, _ oci.Client, c *containers.Container, s *oci.Spec) error {
 		if mem != nil {
@@ -334,6 +411,27 @@ func withMemory(mem *specs.LinuxMemory) oci.SpecOpts {
 			}
 			s.Linux.Resources.Memory.Limit = mem.Limit
 		}
+		return nil
+	}
+}
+
+func withCPU(cpu *specs.LinuxCPU) oci.SpecOpts {
+	return func(ctx context.Context, _ oci.Client, c *containers.Container, s *oci.Spec) error {
+		if cpu != nil {
+			if s.Linux == nil {
+				s.Linux = &specs.Linux{}
+			}
+			if s.Linux.Resources == nil {
+				s.Linux.Resources = &specs.LinuxResources{}
+			}
+			if s.Linux.Resources.CPU == nil {
+				s.Linux.Resources.CPU = &specs.LinuxCPU{}
+			}
+
+			s.Linux.Resources.CPU.Quota = cpu.Quota
+			s.Linux.Resources.CPU.Period = cpu.Period
+		}
+
 		return nil
 	}
 }

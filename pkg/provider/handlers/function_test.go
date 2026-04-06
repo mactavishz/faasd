@@ -131,3 +131,36 @@ func Test_readMemoryLimitFromSpec(t *testing.T) {
 		})
 	}
 }
+
+func Test_readCPULimitFromSpec(t *testing.T) {
+	type testCase struct {
+		Name string
+		Spec *specs.Spec
+		Want int64
+	}
+
+	quota := int64(5000)
+	period := uint64(100000)
+	negativeQuota := int64(-1)
+	zeroPeriod := uint64(0)
+
+	tests := []testCase{
+		{Name: "specs.Linux not found", Spec: &specs.Spec{Linux: nil}, Want: int64(0)},
+		{Name: "specs.LinuxResource not found", Spec: &specs.Spec{Linux: &specs.Linux{Resources: nil}}, Want: int64(0)},
+		{Name: "specs.LinuxCPU not found", Spec: &specs.Spec{Linux: &specs.Linux{Resources: &specs.LinuxResources{CPU: nil}}}, Want: int64(0)},
+		{Name: "specs.LinuxCPU.Quota not found", Spec: &specs.Spec{Linux: &specs.Linux{Resources: &specs.LinuxResources{CPU: &specs.LinuxCPU{Quota: nil, Period: &period}}}}, Want: int64(0)},
+		{Name: "specs.LinuxCPU.Period not found", Spec: &specs.Spec{Linux: &specs.Linux{Resources: &specs.LinuxResources{CPU: &specs.LinuxCPU{Quota: &quota, Period: nil}}}}, Want: int64(0)},
+		{Name: "specs.LinuxCPU.Quota invalid", Spec: &specs.Spec{Linux: &specs.Linux{Resources: &specs.LinuxResources{CPU: &specs.LinuxCPU{Quota: &negativeQuota, Period: &period}}}}, Want: int64(0)},
+		{Name: "specs.LinuxCPU.Period invalid", Spec: &specs.Spec{Linux: &specs.Linux{Resources: &specs.LinuxResources{CPU: &specs.LinuxCPU{Quota: &quota, Period: &zeroPeriod}}}}, Want: int64(0)},
+		{Name: "CPU limit set as Want", Spec: &specs.Spec{Linux: &specs.Linux{Resources: &specs.LinuxResources{CPU: &specs.LinuxCPU{Quota: &quota, Period: &period}}}}, Want: int64(50_000_000)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			got := readCPULimitFromSpec(tc.Spec)
+			if got != tc.Want {
+				t.Fatalf("Want %d, got %d", tc.Want, got)
+			}
+		})
+	}
+}

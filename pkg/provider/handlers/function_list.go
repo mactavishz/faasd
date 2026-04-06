@@ -24,6 +24,7 @@ type Function struct {
 	envVars     map[string]string
 	envProcess  string
 	memoryLimit int64
+	cpuLimit    int64
 	createdAt   time.Time
 }
 

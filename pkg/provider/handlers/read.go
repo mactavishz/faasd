@@ -40,6 +40,7 @@ func MakeReadHandler(client *containerd.Client) func(w http.ResponseWriter, r *h
 			annotations := &fn.annotations
 			labels := &fn.labels
 			memory := resource.NewQuantity(fn.memoryLimit, resource.BinarySI)
+			cpu := resource.NewScaledQuantity(fn.cpuLimit, resource.Nano)
 			status := types.FunctionStatus{
 				Name:        fn.name,
 				Image:       fn.image,
@@ -55,8 +56,8 @@ func MakeReadHandler(client *containerd.Client) func(w http.ResponseWriter, r *h
 
 			// Do not remove below memory check for 0
 			// Memory limit should not be included in status until set explicitly
-			limit := &types.FunctionResources{Memory: memory.String()}
-			if limit.Memory != "0" {
+			limit := &types.FunctionResources{Memory: memory.String(), CPU: cpu.String()}
+			if limit.Memory != "0" || limit.CPU != "0" {
 				status.Limits = limit
 			}
 

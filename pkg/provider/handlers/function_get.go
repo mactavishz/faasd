@@ -60,6 +60,7 @@ func GetFunction(client *containerd.Client, name string, namespace string) (Func
 	fn.envProcess = envProcess
 	fn.createdAt = info.CreatedAt
 	fn.memoryLimit = readMemoryLimitFromSpec(spec)
+	fn.cpuLimit = readCPULimitFromSpec(spec)
 
 	replicas := 0
 	task, err := c.Task(ctx, nil)
@@ -147,4 +148,19 @@ func readMemoryLimitFromSpec(spec *specs.Spec) int64 {
 		return 0
 	}
 	return *spec.Linux.Resources.Memory.Limit
+}
+
+func readCPULimitFromSpec(spec *specs.Spec) int64 {
+	if spec.Linux == nil || spec.Linux.Resources == nil || spec.Linux.Resources.CPU == nil || spec.Linux.Resources.CPU.Quota == nil || spec.Linux.Resources.CPU.Period == nil {
+		return 0
+	}
+
+	quota := *spec.Linux.Resources.CPU.Quota
+	period := *spec.Linux.Resources.CPU.Period
+
+	if quota <= 0 || period == 0 {
+		return 0
+	}
+
+	return (quota * 1_000_000_000) / int64(period)
 }
