@@ -324,6 +324,7 @@ Look in `hosts` in the current working folder or in `/var/lib/faasd/` to get the
 
 10.62.0.2      prometheus
 10.62.0.3      gateway
+10.62.0.3      faasd.com
 10.62.0.4      nats
 10.62.0.5      queue-worker
 ```
@@ -335,6 +336,8 @@ Since faasd-provider uses containerd heavily it is not running as a container, b
 * Prometheus will run on the Prometheus IP plus port 8080 i.e. http://[prometheus_ip]:9090/targets
 
 * faasd-provider runs on 10.62.0.1:8081, i.e. directly on the host, and accessible via the bridge interface from CNI.
+
+* From function containers, `faasd.com` resolves to the gateway IP so internal calls can use `http://faasd.com/function/<name>`.
 
 * Now go to the gateway's IP address as shown above on port 8080, i.e. http://[gateway_ip]:8080 - you can also use this address to deploy OpenFaaS Functions via the `faas-cli`. 
 

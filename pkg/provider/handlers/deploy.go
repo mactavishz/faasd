@@ -31,6 +31,8 @@ import (
 const (
 	annotationLabelPrefix          = "com.openfaas.annotations."
 	defaultCPUCFSPeriodMicrosecond = uint64(100000)
+	defaultGatewayURL              = "http://faasd.com:8080"
+	faasdGatewayURLEnv             = "FAASD_GATEWAY_URL"
 )
 
 // MakeDeployHandler returns a handler to deploy a function
@@ -279,6 +281,7 @@ func createTask(ctx context.Context, container containerd.Container, cni gocni.C
 func prepareEnv(envProcess string, reqEnvVars map[string]string) []string {
 	envs := []string{}
 	fprocessFound := false
+	faasdGatewayURLFound := false
 	fprocess := "fprocess=" + envProcess
 	if len(envProcess) > 0 {
 		fprocessFound = true
@@ -288,14 +291,31 @@ func prepareEnv(envProcess string, reqEnvVars map[string]string) []string {
 		if k == "fprocess" {
 			fprocessFound = true
 			fprocess = v
+		} else if k == faasdGatewayURLEnv {
+			faasdGatewayURLFound = true
+			envs = append(envs, k+"="+strings.TrimRight(v, "/"))
 		} else {
 			envs = append(envs, k+"="+v)
 		}
 	}
+
+	if !faasdGatewayURLFound {
+		envs = append(envs, faasdGatewayURLEnv+"="+getFaasdGatewayURL())
+	}
+
 	if fprocessFound {
 		envs = append(envs, fprocess)
 	}
 	return envs
+}
+
+func getFaasdGatewayURL() string {
+	value := strings.TrimSpace(os.Getenv(faasdGatewayURLEnv))
+	if len(value) == 0 {
+		return defaultGatewayURL
+	}
+
+	return strings.TrimRight(value, "/")
 }
 
 // getOSMounts provides a mount for os-specific files such

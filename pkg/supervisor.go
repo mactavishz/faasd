@@ -31,6 +31,8 @@ import (
 const (
 	// workingDirectoryPermission user read/write/execute, group and others: read-only
 	workingDirectoryPermission = 0744
+	internalGatewayAlias       = "faasd.com"
+	gatewayServiceName         = "gateway"
 )
 
 type Service struct {
@@ -92,17 +94,14 @@ func (s *Supervisor) Start(svcs []Service) error {
 	ctx := namespaces.WithNamespace(context.Background(), FaasdNamespace)
 
 	wd, _ := os.Getwd()
+	hostsFilePath := path.Join(wd, "hosts")
 
 	gw, err := cninetwork.CNIGateway()
 	if err != nil {
 		return err
 	}
-	hosts := fmt.Sprintf(`
-127.0.0.1	localhost
-%s	faasd-provider`, gw)
-
-	writeHostsErr := os.WriteFile(path.Join(wd, "hosts"),
-		[]byte(hosts), workingDirectoryPermission)
+	writeHostsErr := os.WriteFile(hostsFilePath,
+		renderBaseHosts(gw), workingDirectoryPermission)
 
 	if writeHostsErr != nil {
 		return fmt.Errorf("cannot write hosts file: %s", writeHostsErr)
@@ -254,16 +253,14 @@ func (s *Supervisor) Start(svcs []Service) error {
 
 		log.Printf("%s has IP: %s\n", newContainer.ID(), ip)
 
-		hosts, err := os.ReadFile("hosts")
+		hosts, err := os.ReadFile(hostsFilePath)
 		if err != nil {
 			log.Printf("Unable to read hosts file: %s\n", err.Error())
 		}
 
-		hosts = []byte(string(hosts) + fmt.Sprintf(`
-%s	%s
-`, ip, svc.Name))
+		hosts = appendServiceHosts(hosts, svc.Name, ip)
 
-		if err := os.WriteFile("hosts", hosts, workingDirectoryPermission); err != nil {
+		if err := os.WriteFile(hostsFilePath, hosts, workingDirectoryPermission); err != nil {
 			log.Printf("Error writing file: %s %s\n", "hosts", err)
 		}
 
@@ -304,6 +301,19 @@ func (s *Supervisor) Remove(svcs []Service) error {
 		}
 	}
 	return nil
+}
+
+func renderBaseHosts(cniGateway string) []byte {
+	return []byte(fmt.Sprintf("127.0.0.1\tlocalhost\n%s\tfaasd-provider\n", cniGateway))
+}
+
+func appendServiceHosts(existing []byte, serviceName, serviceIP string) []byte {
+	updated := append(existing, []byte(fmt.Sprintf("%s\t%s\n", serviceIP, serviceName))...)
+	if serviceName == gatewayServiceName {
+		updated = append(updated, []byte(fmt.Sprintf("%s\t%s\n", serviceIP, internalGatewayAlias))...)
+	}
+
+	return updated
 }
 
 func withUserOrDefault(userstr string) oci.SpecOpts {

@@ -3,10 +3,52 @@ package handlers
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
+
+func Test_prepareEnvInjectsFaasdGatewayURL(t *testing.T) {
+	t.Setenv(faasdGatewayURLEnv, "")
+
+	env := prepareEnv("python index.py", map[string]string{"env": "value"})
+	got := strings.Join(env, "\n")
+
+	if !strings.Contains(got, "env=value") {
+		t.Fatalf("expected custom env var to be preserved, got: %v", env)
+	}
+
+	if !strings.Contains(got, faasdGatewayURLEnv+"="+defaultGatewayURL) {
+		t.Fatalf("expected %s to be injected with default URL, got: %v", faasdGatewayURLEnv, env)
+	}
+}
+
+func Test_prepareEnvUsesConfiguredGatewayURLFromProviderEnv(t *testing.T) {
+	t.Setenv(faasdGatewayURLEnv, "http://faasd.com:9090/")
+
+	env := prepareEnv("python index.py", map[string]string{})
+	got := strings.Join(env, "\n")
+
+	if !strings.Contains(got, faasdGatewayURLEnv+"=http://faasd.com:9090") {
+		t.Fatalf("expected provider configured %s to be injected, got: %v", faasdGatewayURLEnv, env)
+	}
+}
+
+func Test_prepareEnvRespectsFunctionProvidedGatewayURL(t *testing.T) {
+	t.Setenv(faasdGatewayURLEnv, "http://faasd.com:9090")
+
+	env := prepareEnv("python index.py", map[string]string{faasdGatewayURLEnv: "http://custom-gw:7777/"})
+	got := strings.Join(env, "\n")
+
+	if !strings.Contains(got, faasdGatewayURLEnv+"=http://custom-gw:7777") {
+		t.Fatalf("expected request-provided %s to win, got: %v", faasdGatewayURLEnv, env)
+	}
+
+	if strings.Contains(got, faasdGatewayURLEnv+"=http://faasd.com:9090") {
+		t.Fatalf("did not expect provider env %s to override request value, got: %v", faasdGatewayURLEnv, env)
+	}
+}
 
 func Test_BuildLabelsAndAnnotationsFromServiceSpec_Annotations(t *testing.T) {
 	container := map[string]string{
