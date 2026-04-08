@@ -143,6 +143,8 @@ func getResolver(configFile *configfile.ConfigFile) (remotes.Resolver, error) {
 		docker.WithPlainHTTP(makePlainHTTPMatcher(parsePlainHTTPRegistries())),
 	}
 
+	authOpts := []docker.AuthorizerOpt{}
+
 	if configFile != nil {
 		// credsFunc is based on https://github.com/moby/buildkit/blob/0b130cca040246d2ddf55117eeff34f546417e40/session/auth/authprovider/authprovider.go#L35
 		credFunc := func(host string) (string, string, error) {
@@ -159,10 +161,11 @@ func getResolver(configFile *configfile.ConfigFile) (remotes.Resolver, error) {
 			return ac.Username, ac.Password, nil
 		}
 
-		authOpts := []docker.AuthorizerOpt{docker.WithAuthCreds(credFunc)}
-		authorizer := docker.NewDockerAuthorizer(authOpts...)
-		registryOpts = append(registryOpts, docker.WithAuthorizer(authorizer))
+		authOpts = append(authOpts, docker.WithAuthCreds(credFunc))
 	}
+
+	authorizer := docker.NewDockerAuthorizer(authOpts...)
+	registryOpts = append(registryOpts, docker.WithAuthorizer(authorizer))
 
 	opts := docker.ResolverOptions{
 		Hosts: docker.ConfigureDefaultRegistries(registryOpts...),
