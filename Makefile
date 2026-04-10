@@ -1,6 +1,5 @@
-Version := $(shell git describe --tags --dirty)
 GitCommit := $(shell git rev-parse HEAD)
-LDFLAGS := "-s -w -X github.com/openfaas/faasd/pkg.Version=$(Version) -X github.com/openfaas/faasd/pkg.GitCommit=$(GitCommit)"
+LDFLAGS := "-s -w -X github.com/openfaas/faasd/pkg.GitCommit=$(GitCommit)"
 CONTAINERD_VER := 1.7.27
 CNI_VERSION := v0.9.1
 ARCH := amd64
@@ -14,7 +13,7 @@ all: test dist hashgen
 publish: dist hashgen
 
 local:
-	CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o bin/faasd
+	CGO_ENABLED=0 go build -mod=vendor -o bin/faasd
 	
 .PHONY: clean
 clean:
@@ -22,16 +21,16 @@ clean:
 
 .PHONY: test
 test:
-	CGO_ENABLED=0 GOOS=linux go test -mod=vendor -ldflags $(LDFLAGS) ./...
+	CGO_ENABLED=0 go test -mod=vendor -ldflags $(LDFLAGS) ./...
 
 .PHONY: dist-local
 dist-local:
-	CGO_ENABLED=0 GOOS=linux go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd
+	CGO_ENABLED=0 go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd
 
 .PHONY: dist
 dist:
-	CGO_ENABLED=0 GOOS=linux go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd-arm64
+	CGO_ENABLED=0 go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd
+	CGO_ENABLED=0 GOARCH=arm64 go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd-arm64
 
 .PHONY: hashgen
 hashgen:
