@@ -4,8 +4,6 @@ CONTAINERD_VER := 1.7.27
 CNI_VERSION := v0.9.1
 ARCH := amd64
 
-export GO111MODULE=on
-
 .PHONY: all
 all: test dist hashgen
 
@@ -13,7 +11,7 @@ all: test dist hashgen
 publish: dist hashgen
 
 local:
-	CGO_ENABLED=0 go build -mod=vendor -o bin/faasd
+	CGO_ENABLED=0 go build -o bin/faasd
 	
 .PHONY: clean
 clean:
@@ -21,16 +19,16 @@ clean:
 
 .PHONY: test
 test:
-	CGO_ENABLED=0 go test -mod=vendor -ldflags $(LDFLAGS) ./...
+	CGO_ENABLED=0 go test -ldflags $(LDFLAGS) ./...
 
 .PHONY: dist-local
 dist-local:
-	CGO_ENABLED=0 go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd
+	CGO_ENABLED=0 go build -ldflags $(LDFLAGS) -o bin/faasd
 
 .PHONY: dist
 dist:
-	CGO_ENABLED=0 go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd
-	CGO_ENABLED=0 GOARCH=arm64 go build -mod=vendor -ldflags $(LDFLAGS) -o bin/faasd-arm64
+	CGO_ENABLED=0 go build -ldflags $(LDFLAGS) -o bin/faasd
+	CGO_ENABLED=0 GOARCH=arm64 go build -ldflags $(LDFLAGS) -o bin/faasd-arm64
 
 .PHONY: hashgen
 hashgen:
