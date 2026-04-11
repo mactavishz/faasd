@@ -11,5 +11,8 @@ Restart=on-failure
 RestartSec=10s
 WorkingDirectory={{.Cwd}}
 
+# Environment variables (can be overridden in /etc/default/faasd)
+EnvironmentFile=-/etc/default/faasd
+
 [Install]
 WantedBy=multi-user.target

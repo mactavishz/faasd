@@ -12,10 +12,38 @@ publish: dist hashgen
 
 local:
 	CGO_ENABLED=0 go build -o bin/faasd
+
+.PHONY: install
+install: dist-local
+	# Install faasd binary first (required for faasd install command)
+	echo "Installing new faasd binary..."
+	sudo rm -f /usr/local/bin/faasd
+	sudo cp bin/faasd /usr/local/bin/faasd
+	sudo chmod +x /usr/local/bin/faasd
+
+	# Verify the binary was installed
+	echo "Verifying binary..."
+	ls -lh /usr/local/bin/faasd
+	/usr/local/bin/faasd version
+
+	# Install faasd services using the new binary
+	sudo /usr/local/bin/faasd install
+
 	
+.PHONY: uninstall
+uninstall:
+	sudo rm -rf /usr/local/bin/faasd
+	sudo rm -rf /var/lib/faasd
+	sudo rm -rf /usr/lib/systemd/system/faasd-provider.service
+	sudo rm -rf /usr/lib/systemd/system/faasd.service
+
 .PHONY: clean
 clean:
-	rm -f bin/faasd*
+	./hack/clean.sh
+
+.PHONY: down
+down:
+	./hack/down.sh
 
 .PHONY: test
 test:
