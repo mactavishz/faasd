@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,8 +24,11 @@ import (
 // dockerConfigDir contains "config.json"
 const dockerConfigDir = "/var/lib/faasd/.docker/"
 
-// this is only used for testing and development, so we can specify additional registries that should be accessed over plain HTTP (without TLS)
-const plainHTTPRegistriesEnvVar = "FAASD_PLAIN_HTTP_REGISTRIES"
+const devRegistryAliasEnvVar = "FAASD_DEV_REGISTRY_ALIAS"
+const devRegistryAliasDefault = "registry.local"
+const devRegistryPortEnvVar = "FAASD_DEV_REGISTRY_PORT"
+const devRegistryPortDefault = "5050"
+const devRegistryGatewayIPEnvVar = "FAASD_DEV_REGISTRY_GATEWAY_IP"
 
 // Remove removes a container
 func Remove(ctx context.Context, client *containerd.Client, name string) error {
@@ -139,8 +144,10 @@ func killTask(ctx context.Context, task containerd.Task, gracePeriod time.Durati
 }
 
 func getResolver(configFile *configfile.ConfigFile) (remotes.Resolver, error) {
+	devRegistryAlias := getDevRegistryAlias()
+	devRegistryPort := getDevRegistryPort()
 	registryOpts := []docker.RegistryOpt{
-		docker.WithPlainHTTP(makePlainHTTPMatcher(parsePlainHTTPRegistries())),
+		docker.WithPlainHTTP(makePlainHTTPMatcher(devRegistryAlias)),
 	}
 
 	authOpts := []docker.AuthorizerOpt{}
@@ -167,31 +174,41 @@ func getResolver(configFile *configfile.ConfigFile) (remotes.Resolver, error) {
 	authorizer := docker.NewDockerAuthorizer(authOpts...)
 	registryOpts = append(registryOpts, docker.WithAuthorizer(authorizer))
 
+	defaultHosts := docker.ConfigureDefaultRegistries(registryOpts...)
+
 	opts := docker.ResolverOptions{
-		Hosts: docker.ConfigureDefaultRegistries(registryOpts...),
+		Hosts: func(namespace string) ([]docker.RegistryHost, error) {
+			hosts, err := defaultHosts(namespace)
+			if err != nil {
+				return nil, err
+			}
+
+			if !isDevRegistryAlias(namespace, devRegistryAlias) {
+				return hosts, nil
+			}
+
+			devRegistryGatewayIP, gatewayErr := detectHostGatewayIP()
+			if gatewayErr != nil {
+				return nil, fmt.Errorf("cannot resolve host gateway IP for %s: %w", devRegistryAlias, gatewayErr)
+			}
+
+			targetHost, shouldRewrite := resolveDevRegistryHost(namespace, devRegistryAlias, devRegistryPort, devRegistryGatewayIP)
+			if !shouldRewrite {
+				return hosts, nil
+			}
+
+			for i := range hosts {
+				hosts[i].Host = targetHost
+				hosts[i].Scheme = "http"
+			}
+
+			return hosts, nil
+		},
 	}
 	return docker.NewResolver(opts), nil
 }
 
-func parsePlainHTTPRegistries() map[string]struct{} {
-	hosts := map[string]struct{}{}
-
-	for _, item := range strings.Split(os.Getenv(plainHTTPRegistriesEnvVar), ",") {
-		host := strings.ToLower(strings.TrimSpace(item))
-		host = strings.TrimPrefix(host, "http://")
-		host = strings.TrimPrefix(host, "https://")
-		host = strings.TrimSuffix(host, "/")
-		if host == "" {
-			continue
-		}
-
-		hosts[host] = struct{}{}
-	}
-
-	return hosts
-}
-
-func makePlainHTTPMatcher(extraHosts map[string]struct{}) func(string) (bool, error) {
+func makePlainHTTPMatcher(devRegistryAlias string) func(string) (bool, error) {
 	return func(host string) (bool, error) {
 		match, err := docker.MatchLocalhost(host)
 		if err != nil {
@@ -201,14 +218,102 @@ func makePlainHTTPMatcher(extraHosts map[string]struct{}) func(string) (bool, er
 			return true, nil
 		}
 
-		normalized := strings.ToLower(strings.TrimSpace(host))
-		normalized = strings.TrimPrefix(normalized, "http://")
-		normalized = strings.TrimPrefix(normalized, "https://")
-		normalized = strings.TrimSuffix(normalized, "/")
+		if isDevRegistryAlias(host, devRegistryAlias) {
+			return true, nil
+		}
 
-		_, ok := extraHosts[normalized]
-		return ok, nil
+		return false, nil
 	}
+}
+
+func resolveDevRegistryHost(namespace, devRegistryAlias, devRegistryPort, devRegistryGatewayIP string) (string, bool) {
+	if devRegistryGatewayIP == "" {
+		return "", false
+	}
+
+	hostName, port := splitHostAndPort(namespace)
+	if !strings.EqualFold(hostName, devRegistryAlias) {
+		return "", false
+	}
+
+	if port == "" {
+		port = devRegistryPort
+	}
+
+	return net.JoinHostPort(devRegistryGatewayIP, port), true
+}
+
+func isDevRegistryAlias(host, devRegistryAlias string) bool {
+	hostName, _ := splitHostAndPort(host)
+	return strings.EqualFold(hostName, devRegistryAlias)
+}
+
+func splitHostAndPort(value string) (string, string) {
+	host := strings.ToLower(strings.TrimSpace(value))
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimSuffix(host, "/")
+
+	if host == "" {
+		return "", ""
+	}
+
+	if strings.Contains(host, ":") {
+		if parsedHost, parsedPort, err := net.SplitHostPort(host); err == nil {
+			return parsedHost, parsedPort
+		}
+	}
+
+	return host, ""
+}
+
+func getDevRegistryAlias() string {
+	if value := strings.TrimSpace(os.Getenv(devRegistryAliasEnvVar)); value != "" {
+		return strings.ToLower(value)
+	}
+
+	return devRegistryAliasDefault
+}
+
+func getDevRegistryPort() string {
+	if value := strings.TrimSpace(os.Getenv(devRegistryPortEnvVar)); value != "" {
+		return value
+	}
+
+	return devRegistryPortDefault
+}
+
+func detectHostGatewayIP() (string, error) {
+	if value := strings.TrimSpace(os.Getenv(devRegistryGatewayIPEnvVar)); value != "" {
+		return value, nil
+	}
+
+	raw, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return "", err
+	}
+
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[1] != "00000000" {
+			continue
+		}
+
+		gatewayHex := fields[2]
+		parsed, parseErr := strconv.ParseUint(gatewayHex, 16, 32)
+		if parseErr != nil {
+			continue
+		}
+
+		ip := net.IPv4(byte(parsed), byte(parsed>>8), byte(parsed>>16), byte(parsed>>24))
+		if ip.IsUnspecified() {
+			continue
+		}
+
+		return ip.String(), nil
+	}
+
+	return "", fmt.Errorf("no default route found in /proc/net/route")
 }
 
 func PrepareImage(ctx context.Context, client *containerd.Client, imageName, snapshotter string, pullAlways bool) (containerd.Image, error) {
