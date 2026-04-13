@@ -304,7 +304,7 @@ func (s *Supervisor) Remove(svcs []Service) error {
 }
 
 func renderBaseHosts(cniGateway string) []byte {
-	return []byte(fmt.Sprintf("127.0.0.1\tlocalhost\n%s\tfaasd-provider\n", cniGateway))
+	return []byte(fmt.Sprintf("127.0.0.1\tlocalhost\n%s\tfaasd-provider\n%s\tgateway\n%s\t%s\n", cniGateway, cniGateway, cniGateway, internalGatewayAlias))
 }
 
 func appendServiceHosts(existing []byte, serviceName, serviceIP string) []byte {

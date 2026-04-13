@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strings"
 
 	systemd "github.com/openfaas/faasd/pkg/systemd"
 	"github.com/pkg/errors"
@@ -18,11 +19,11 @@ var installCmd = &cobra.Command{
 	RunE:  runInstall,
 }
 
-const workingDirectoryPermission = 0644
+const workingDirectoryPermission = 0755
 
 const faasdwd = "/var/lib/faasd"
-
 const faasdProviderWd = "/var/lib/faasd-provider"
+const gatewayRuntimeEnvFile = "gateway.env"
 
 func runInstall(_ *cobra.Command, _ []string) error {
 
@@ -50,7 +51,15 @@ func runInstall(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if err := writeGatewayEnv(path.Join(faasdwd, gatewayRuntimeEnvFile)); err != nil {
+		return errors.Wrap(err, "cannot write gateway env file")
+	}
+
 	if err := binExists("/usr/local/bin/", "faasd"); err != nil {
+		return err
+	}
+
+	if err := binExists("/usr/local/bin/", "faasd-gateway"); err != nil {
 		return err
 	}
 
@@ -61,6 +70,13 @@ func runInstall(_ *cobra.Command, _ []string) error {
 	}
 
 	if err := systemd.InstallUnit("faasd", map[string]string{"Cwd": faasdwd}); err != nil {
+		return err
+	}
+
+	if err := systemd.InstallUnit("faasd-gateway", map[string]string{
+		"Cwd":            faasdwd,
+		"GatewayEnvPath": path.Join(faasdwd, gatewayRuntimeEnvFile),
+	}); err != nil {
 		return err
 	}
 
@@ -76,11 +92,19 @@ func runInstall(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if err := systemd.Enable("faasd-gateway"); err != nil {
+		return err
+	}
+
 	if err := systemd.Start("faasd-provider"); err != nil {
 		return err
 	}
 
 	if err := systemd.Start("faasd"); err != nil {
+		return err
+	}
+
+	if err := systemd.Start("faasd-gateway"); err != nil {
 		return err
 	}
 
@@ -91,6 +115,11 @@ minute or two depending on your connection.
 Check the status of the faasd service with:
 
   sudo journalctl -u faasd --lines 100 -f
+  sudo journalctl -u faasd-provider --lines 100 -f
+
+Gateway logs:
+
+  sudo journalctl -u faasd-gateway --lines 100 -f
 
 Login with:
   sudo -E cat /var/lib/faasd/secrets/basic-auth-password | faas-cli login -s`)
@@ -98,6 +127,28 @@ Login with:
 	fmt.Println("")
 
 	return nil
+}
+
+func writeGatewayEnv(filePath string) error {
+	lines := []string{
+		"basic_auth=true",
+		"functions_provider_url=http://127.0.0.1:8081/",
+		"logs_provider_url=http://127.0.0.1:8081/",
+		"direct_functions=false",
+		"read_timeout=60s",
+		"write_timeout=60s",
+		"upstream_timeout=65s",
+		"faas_nats_address=127.0.0.1",
+		"faas_nats_port=4222",
+		"faas_prometheus_host=127.0.0.1",
+		"faas_prometheus_port=9090",
+		"secret_mount_path=/var/lib/faasd/secrets",
+		"scale_from_zero=true",
+		"function_namespace=openfaas-fn",
+	}
+
+	content := strings.Join(lines, "\n") + "\n"
+	return os.WriteFile(filePath, []byte(content), workingDirectoryPermission)
 }
 
 func binExists(folder, name string) error {

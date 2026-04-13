@@ -15,7 +15,7 @@ local:
 
 .PHONY: install
 install: dist-local
-	# Install faasd binary first (required for faasd install command)
+	# Install faasd binary (required for faasd install command)
 	echo "Installing new faasd binary..."
 	sudo rm -f /usr/local/bin/faasd
 	sudo cp bin/faasd /usr/local/bin/faasd
@@ -33,9 +33,14 @@ install: dist-local
 .PHONY: uninstall
 uninstall:
 	sudo rm -rf /usr/local/bin/faasd
+	sudo rm -rf /usr/local/bin/faasd-gateway
 	sudo rm -rf /var/lib/faasd
 	sudo rm -rf /usr/lib/systemd/system/faasd-provider.service
 	sudo rm -rf /usr/lib/systemd/system/faasd.service
+	sudo rm -rf /usr/lib/systemd/system/faasd-gateway.service
+	sudo rm -rf /lib/systemd/system/faasd-provider.service
+	sudo rm -rf /lib/systemd/system/faasd.service
+	sudo rm -rf /lib/systemd/system/faasd-gateway.service
 
 .PHONY: clean
 clean:

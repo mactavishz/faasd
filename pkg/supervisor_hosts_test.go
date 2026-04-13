@@ -16,8 +16,12 @@ func TestRenderBaseHosts(t *testing.T) {
 		t.Fatalf("base hosts missing faasd-provider entry: %q", hosts)
 	}
 
-	if strings.Contains(hosts, "\tfaasd.com\n") {
-		t.Fatalf("base hosts should not include faasd.com alias before gateway is assigned: %q", hosts)
+	if !strings.Contains(hosts, "10.62.0.1\tgateway\n") {
+		t.Fatalf("base hosts missing gateway entry: %q", hosts)
+	}
+
+	if !strings.Contains(hosts, "10.62.0.1\tfaasd.com\n") {
+		t.Fatalf("base hosts missing faasd.com alias: %q", hosts)
 	}
 }
 

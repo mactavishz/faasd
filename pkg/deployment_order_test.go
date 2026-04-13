@@ -153,14 +153,10 @@ func Test_buildDeploymentOrderComposeFile(t *testing.T) {
 
 	queueWorker := indexStr(order, "queue-worker")
 	nats := indexStr(order, "nats")
-	gateway := indexStr(order, "gateway")
 	prometheus := indexStr(order, "prometheus")
 
-	if prometheus > gateway {
-		t.Fatalf("Prometheus order was after gateway, and should be before")
-	}
-	if nats > gateway {
-		t.Fatalf("NATS order was after gateway, and should be before")
+	if prometheus > queueWorker {
+		t.Fatalf("Prometheus order was after queue-worker, and should be before")
 	}
 	if nats > queueWorker {
 		t.Fatalf("NATS order was after queue-worker, and should be before")
@@ -171,18 +167,10 @@ func Test_buildDeploymentOrderOpenFaaS(t *testing.T) {
 	svcs := []Service{
 		{
 			Name:      "queue-worker",
-			DependsOn: []string{"nats"},
+			DependsOn: []string{"nats", "prometheus"},
 		},
 		{
 			Name:      "prometheus",
-			DependsOn: []string{},
-		},
-		{
-			Name:      "gateway",
-			DependsOn: []string{"prometheus", "nats", "basic-auth-plugin"},
-		},
-		{
-			Name:      "basic-auth-plugin",
 			DependsOn: []string{},
 		},
 		{
@@ -199,14 +187,10 @@ func Test_buildDeploymentOrderOpenFaaS(t *testing.T) {
 
 	queueWorker := indexStr(order, "queue-worker")
 	nats := indexStr(order, "nats")
-	gateway := indexStr(order, "gateway")
 	prometheus := indexStr(order, "prometheus")
 
-	if prometheus > gateway {
-		t.Fatalf("Prometheus order was after gateway, and should be before")
-	}
-	if nats > gateway {
-		t.Fatalf("NATS order was after gateway, and should be before")
+	if prometheus > queueWorker {
+		t.Fatalf("Prometheus order was after queue-worker, and should be before")
 	}
 	if nats > queueWorker {
 		t.Fatalf("NATS order was after queue-worker, and should be before")

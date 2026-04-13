@@ -1,0 +1,19 @@
+[Unit]
+Description=faasd-gateway
+After=faasd-provider.service faasd.service
+Requires=faasd-provider.service faasd.service
+
+[Service]
+MemoryMax=500M
+ExecStartPre=/bin/bash -c 'for i in {1..30}; do curl -fsS http://127.0.0.1:8081/healthz >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
+ExecStartPre=/bin/bash -c 'for i in {1..30}; do (echo > /dev/tcp/127.0.0.1/4222) >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
+ExecStart=/usr/local/bin/faasd-gateway
+Restart=on-failure
+RestartSec=10s
+
+# Environment variables (can be overridden in /etc/default/faasd-gateway)
+EnvironmentFile=-{{.GatewayEnvPath}}
+EnvironmentFile=-/etc/default/faasd-gateway
+
+[Install]
+WantedBy=multi-user.target
