@@ -11,9 +11,9 @@ ExecStart=/usr/local/bin/faasd-gateway
 Restart=on-failure
 RestartSec=10s
 
-# Environment variables (can be overridden in /etc/default/faasd-gateway)
+# Environment variables (can be overridden in /etc/default/faasd)
 EnvironmentFile=-{{.GatewayEnvPath}}
-EnvironmentFile=-/etc/default/faasd-gateway
+EnvironmentFile=-/etc/default/faasd
 
 [Install]
 WantedBy=multi-user.target

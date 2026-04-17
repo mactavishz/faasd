@@ -7,7 +7,6 @@ sudo systemctl disable --now faasd 2>/dev/null || echo "faasd not running"
 sudo systemctl disable --now faasd-provider 2>/dev/null || echo "faasd-provider not running"
 sudo systemctl disable --now faasd-gateway 2>/dev/null || echo "faasd-gateway not running"
 sudo rm -f /etc/default/faasd
-sudo rm -f /etc/default/faasd-gateway
 
 echo "==> Flushing old logs..."
 sudo journalctl --rotate --vacuum-time=1s -u faasd || true
