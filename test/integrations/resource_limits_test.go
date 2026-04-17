@@ -43,9 +43,9 @@ func (s *ResourceLimitsSuite) TestResourceLimitsInFaasd() {
 	})
 
 	payload := []byte("verify resource limits")
-	status, body := testutil.InvokeFunctionEventually(t, s.baseURL, s.auth, fnName, payload, http.StatusAccepted, 90*time.Second)
-	require.Equal(t, http.StatusAccepted, status)
-	assert.Empty(t, body)
+	status, body := testutil.InvokeFunctionEventually(t, s.baseURL, s.auth, fnName, payload, http.StatusOK, 90*time.Second)
+	require.Equal(t, http.StatusOK, status)
+	assert.NotEmpty(t, body)
 
 	deployedFn := testutil.WaitForFunction(t, s.baseURL, s.auth, fnName, 20*time.Second)
 	require.NotNil(t, deployedFn.Limits, "expected limits in /system/functions")

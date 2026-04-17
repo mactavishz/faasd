@@ -34,7 +34,7 @@ func (s *ExampleFunctionsSuite) TestRemoteImageNodeInfo() {
 
 	fnName := "nodeinfo"
 
-	_ = testutil.TryRemoveFunction(t, fnName, s.baseURL)
+	testutil.RemoveFunction(t, fnName, s.baseURL)
 	t.Cleanup(func() { testutil.RemoveFunction(t, fnName, s.baseURL) })
 	testutil.DeployStack(t, stackPath, s.baseURL)
 
@@ -60,7 +60,7 @@ func (s *ExampleFunctionsSuite) TestLocalBuildPushEchoJS() {
 
 	fnName := "echo-js"
 
-	_ = testutil.TryRemoveFunction(t, fnName, s.baseURL)
+	testutil.RemoveFunction(t, fnName, s.baseURL)
 	t.Cleanup(func() { testutil.RemoveFunction(t, fnName, s.baseURL) })
 	testutil.BuildStack(t, stackPath)
 	testutil.PushStack(t, stackPath)

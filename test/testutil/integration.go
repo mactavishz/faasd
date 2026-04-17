@@ -17,7 +17,6 @@ import (
 
 	sdkstack "github.com/openfaas/go-sdk/stack"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -265,64 +264,6 @@ func FixtureFunction(t *testing.T, fixtureDir string, sourceName string) sdkstac
 	return fn
 }
 
-func PrepareBuildPushStack(t *testing.T, fixtureDir string, sourceName string, targetName string, targetImage string) string {
-	t.Helper()
-
-	tempDir := t.TempDir()
-	copyDir(t, fixtureDir, tempDir)
-
-	stackPath := filepath.Join(tempDir, "stack.yaml")
-	services, err := sdkstack.ParseYAMLFile(stackPath, "", "", false)
-	require.NoError(t, err)
-	require.NotNil(t, services)
-
-	original, ok := services.Functions[sourceName]
-	require.True(t, ok, "source function %q not found in stack", sourceName)
-
-	if targetImage != "" {
-		original.Image = targetImage
-	}
-	original.Name = targetName
-
-	services.Functions = map[string]sdkstack.Function{targetName: original}
-	writeStackFile(t, stackPath, services)
-
-	return stackPath
-}
-
-func writeStackFile(t *testing.T, stackPath string, services *sdkstack.Services) {
-	t.Helper()
-
-	out, err := yaml.Marshal(services)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(stackPath, out, 0o644))
-}
-
-func copyDir(t *testing.T, src string, dst string) {
-	t.Helper()
-
-	require.NoError(t, os.MkdirAll(dst, 0o755))
-	require.NoError(t, filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, b, info.Mode())
-	}))
-}
-
 func BuildStack(t *testing.T, stackPath string) {
 	t.Helper()
 	t.Logf("building stack with: faas-cli build -f %s", stackPath)
@@ -376,22 +317,17 @@ func DeployFunction(t *testing.T, gateway string, functionName string, fn sdksta
 	if memory != "" {
 		args = append(args, "--memory-limit", memory)
 	}
-
+	t.Logf("deploying function with: faas-cli %s", strings.Join(args, " "))
 	MustCommand(t, 10*time.Minute, RepoRoot(t), nil, "faas-cli", args...)
 }
 
 func RemoveFunction(t *testing.T, functionName string, gateway string) {
 	t.Helper()
+	t.Logf("attempting to remove function %q with: faas-cli remove %s --gateway %s", functionName, functionName, gateway)
 	_, err := TryCommand(60*time.Second, "", "faas-cli", "remove", functionName, "--gateway", gateway)
 	if err != nil {
 		t.Logf("cleanup remove failed for function %q: %v", functionName, err)
 	}
-}
-
-func TryRemoveFunction(t *testing.T, functionName string, gateway string) error {
-	t.Helper()
-	_, err := TryCommand(60*time.Second, "", "faas-cli", "remove", functionName, "--gateway", gateway)
-	return err
 }
 
 func InvokeFunction(t *testing.T, baseURL string, auth GatewayAuth, functionName string, payload io.Reader) (int, []byte) {
