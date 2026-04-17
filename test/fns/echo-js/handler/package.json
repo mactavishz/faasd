@@ -1,0 +1,9 @@
+{
+  "name": "handler",
+  "version": "1.0.0",
+  "description": "echo-js is a function that echos back the request body and headers.",
+  "main": "handler.js",
+  "scripts": {
+    "test": "echo \"No tests\""
+  }
+}
