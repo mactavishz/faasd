@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfaas/faasd/test/testutil"
+	testutil "github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/tests/integration/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -17,7 +17,7 @@ const defaultCFSPeriod = uint64(100000)
 type ResourceLimitsSuite struct {
 	suite.Suite
 	baseURL string
-	auth    testutil.GatewayAuth
+	auth    testutil.FaasdGatewayAuth
 }
 
 func TestResourceLimitsSuite(t *testing.T) {
@@ -43,11 +43,11 @@ func (s *ResourceLimitsSuite) TestResourceLimitsInFaasd() {
 	})
 
 	payload := []byte("verify resource limits")
-	status, body := testutil.InvokeFunctionEventually(t, s.baseURL, s.auth, fnName, payload, http.StatusOK, 90*time.Second)
+	status, body := testutil.InvokeFaasdFunctionEventually(t, s.baseURL, s.auth, fnName, payload, http.StatusOK, 90*time.Second)
 	require.Equal(t, http.StatusOK, status)
 	assert.NotEmpty(t, body)
 
-	deployedFn := testutil.WaitForFunction(t, s.baseURL, s.auth, fnName, 20*time.Second)
+	deployedFn := testutil.WaitForFaasdFunction(t, s.baseURL, s.auth, fnName, 20*time.Second)
 	require.NotNil(t, deployedFn.Limits, "expected limits in /system/functions")
 	assert.Equal(t, "50m", deployedFn.Limits.CPU)
 	assert.Equal(t, "96Mi", deployedFn.Limits.Memory)

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfaas/faasd/test/testutil"
+	testutil "github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/tests/integration/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -16,7 +16,7 @@ import (
 type ExampleFunctionsSuite struct {
 	suite.Suite
 	baseURL string
-	auth    testutil.GatewayAuth
+	auth    testutil.FaasdGatewayAuth
 }
 
 func TestExampleFunctionsSuite(t *testing.T) {
@@ -38,10 +38,10 @@ func (s *ExampleFunctionsSuite) TestRemoteImageNodeInfo() {
 	t.Cleanup(func() { testutil.RemoveFunction(t, fnName, s.baseURL) })
 	testutil.DeployStack(t, stackPath, s.baseURL)
 
-	deployedFn := testutil.WaitForFunction(t, s.baseURL, s.auth, fnName, 20*time.Second)
+	deployedFn := testutil.WaitForFaasdFunction(t, s.baseURL, s.auth, fnName, 20*time.Second)
 	assert.Equal(t, fnName, deployedFn.Name)
 
-	status, body := testutil.InvokeFunctionEventually(t, s.baseURL, s.auth, fnName, nil, http.StatusOK, 60*time.Second)
+	status, body := testutil.InvokeFaasdFunctionEventually(t, s.baseURL, s.auth, fnName, nil, http.StatusOK, 60*time.Second)
 	bodyStr := string(body)
 	t.Logf("invoke status: %d, body: \n%s", status, bodyStr)
 	assert.NotEmpty(t, bodyStr)
@@ -67,7 +67,7 @@ func (s *ExampleFunctionsSuite) TestLocalBuildPushEchoJS() {
 	testutil.DeployStack(t, stackPath, s.baseURL)
 
 	payload := []byte("hello from local image")
-	status, body := testutil.InvokeFunctionEventually(t, s.baseURL, s.auth, fnName, payload, http.StatusOK, 60*time.Second)
+	status, body := testutil.InvokeFaasdFunctionEventually(t, s.baseURL, s.auth, fnName, payload, http.StatusOK, 60*time.Second)
 	require.Equal(t, http.StatusOK, status)
 
 	t.Logf("invoke status: %d, body: \n%s", status, string(body))
