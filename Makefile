@@ -11,7 +11,7 @@ all: unit-test dist hashgen
 publish: dist hashgen
 
 local:
-	CGO_ENABLED=0 go build -o bin/faasd
+	CGO_ENABLED=0 go build -buildvcs=false -o bin/faasd
 
 .PHONY: install
 install: dist-local
@@ -60,12 +60,12 @@ integration-test:
 
 .PHONY: dist-local
 dist-local:
-	CGO_ENABLED=0 go build -ldflags $(LDFLAGS) -o bin/faasd
+	CGO_ENABLED=0 go build -buildvcs=false -ldflags $(LDFLAGS) -o bin/faasd
 
 .PHONY: dist
 dist:
-	CGO_ENABLED=0 go build -ldflags $(LDFLAGS) -o bin/faasd
-	CGO_ENABLED=0 GOARCH=arm64 go build -ldflags $(LDFLAGS) -o bin/faasd-arm64
+	CGO_ENABLED=0 go build -buildvcs=false -ldflags $(LDFLAGS) -o bin/faasd
+	CGO_ENABLED=0 GOARCH=arm64 go build -buildvcs=false -ldflags $(LDFLAGS) -o bin/faasd-arm64
 
 .PHONY: hashgen
 hashgen:
