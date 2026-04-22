@@ -195,7 +195,19 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 		return fmt.Errorf("unable to create container: %s, error: %w", name, err)
 	}
 
-	return createTask(ctx, container, cni)
+	startInfo, err := createTask(ctx, container, cni)
+	if err != nil {
+		return err
+	}
+
+	namespace := getRequestNamespace(req.Namespace)
+
+	log.Printf("[Ready] waiting for function %s.%s", name, namespace)
+	if err := waitForFunctionReady(startInfo, name, namespace, functionReadyTimeout); err != nil {
+		return err
+	}
+
+	return nil
 
 }
 
@@ -242,14 +254,20 @@ func buildLabels(request *types.FunctionDeployment) (map[string]string, error) {
 	return labels, nil
 }
 
-func createTask(ctx context.Context, container containerd.Container, cni gocni.CNI) error {
+type functionStartInfo struct {
+	ctx  context.Context
+	task containerd.Task
+	addr string
+}
+
+func createTask(ctx context.Context, container containerd.Container, cni gocni.CNI) (functionStartInfo, error) {
 
 	name := container.ID()
 
 	task, taskErr := container.NewTask(ctx, cio.BinaryIO("/usr/local/bin/faasd", nil))
 
 	if taskErr != nil {
-		return fmt.Errorf("unable to start task: %s, error: %w", name, taskErr)
+		return functionStartInfo{}, fmt.Errorf("unable to start task: %s, error: %w", name, taskErr)
 	}
 
 	log.Printf("Container ID: %s\tTask ID: %s\tTask PID: %d\t\n", name, task.ID(), task.Pid())
@@ -258,24 +276,25 @@ func createTask(ctx context.Context, container containerd.Container, cni gocni.C
 	_, err := cninetwork.CreateCNINetwork(ctx, cni, task, labels)
 
 	if err != nil {
-		return err
+		return functionStartInfo{}, err
 	}
 
 	ip, err := cninetwork.GetIPAddress(name, task.Pid())
 	if err != nil {
-		return err
+		return functionStartInfo{}, err
 	}
 
 	log.Printf("%s has IP: %s.\n", name, ip)
 
 	if _, err := task.Wait(ctx); err != nil {
-		return errors.Wrapf(err, "Unable to wait for task to start: %s", name)
+		return functionStartInfo{}, errors.Wrapf(err, "Unable to wait for task to start: %s", name)
 	}
 
 	if startErr := task.Start(ctx); startErr != nil {
-		return errors.Wrapf(startErr, "Unable to start task: %s", name)
+		return functionStartInfo{}, errors.Wrapf(startErr, "Unable to start task: %s", name)
 	}
-	return nil
+
+	return functionStartInfo{ctx: ctx, task: task, addr: fmt.Sprintf("%s:%d", ip, watchdogPort)}, nil
 }
 
 func prepareEnv(envProcess string, reqEnvVars map[string]string) []string {

@@ -124,10 +124,17 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI) func(w h
 		}
 
 		if createNewTask {
-			deployErr := createTask(ctx, ctr, cni)
-			if deployErr != nil {
-				log.Printf("[Scale] error deploying %s, error: %s\n", name, deployErr)
-				http.Error(w, deployErr.Error(), http.StatusBadRequest)
+			startInfo, err := createTask(ctx, ctr, cni)
+			if err != nil {
+				log.Printf("[Scale] error deploying %s, error: %s\n", name, err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			log.Printf("[Ready] waiting for function %s.%s", name, namespace)
+			if err := waitForFunctionReady(startInfo, name, namespace, functionReadyTimeout); err != nil {
+				log.Printf("[Scale] readiness failed for %s, error: %s\n", name, err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 		}
