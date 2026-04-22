@@ -1,6 +1,7 @@
 package integrations
 
 import (
+	"bytes"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -43,7 +44,7 @@ func (s *ResourceLimitsSuite) TestResourceLimitsInFaasd() {
 	})
 
 	payload := []byte("verify resource limits")
-	status, body := testutil.InvokeFaasdFunctionEventually(t, s.baseURL, s.auth, fnName, payload, http.StatusOK, 90*time.Second)
+	status, body := testutil.InvokeFaasdFunction(t, s.baseURL, s.auth, fnName, bytes.NewReader(payload))
 	require.Equal(t, http.StatusOK, status)
 	assert.NotEmpty(t, body)
 

@@ -1,6 +1,7 @@
 package integrations
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -41,7 +42,8 @@ func (s *ExampleFunctionsSuite) TestRemoteImageNodeInfo() {
 	deployedFn := testutil.WaitForFaasdFunction(t, s.baseURL, s.auth, fnName, 20*time.Second)
 	assert.Equal(t, fnName, deployedFn.Name)
 
-	status, body := testutil.InvokeFaasdFunctionEventually(t, s.baseURL, s.auth, fnName, nil, http.StatusOK, 60*time.Second)
+	status, body := testutil.InvokeFaasdFunction(t, s.baseURL, s.auth, fnName, nil)
+	require.Equal(t, http.StatusOK, status)
 	bodyStr := string(body)
 	t.Logf("invoke status: %d, body: \n%s", status, bodyStr)
 	assert.NotEmpty(t, bodyStr)
@@ -67,7 +69,7 @@ func (s *ExampleFunctionsSuite) TestLocalBuildPushEchoJS() {
 	testutil.DeployStack(t, stackPath, s.baseURL)
 
 	payload := []byte("hello from local image")
-	status, body := testutil.InvokeFaasdFunctionEventually(t, s.baseURL, s.auth, fnName, payload, http.StatusOK, 60*time.Second)
+	status, body := testutil.InvokeFaasdFunction(t, s.baseURL, s.auth, fnName, bytes.NewReader(payload))
 	require.Equal(t, http.StatusOK, status)
 
 	t.Logf("invoke status: %d, body: \n%s", status, string(body))
