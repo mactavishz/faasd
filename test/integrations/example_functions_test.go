@@ -31,9 +31,9 @@ func (s *ExampleFunctionsSuite) SetupSuite() {
 func (s *ExampleFunctionsSuite) TestRemoteImageNodeInfo() {
 	t := s.T()
 	repoRoot := testutil.RepoRoot(t)
-	stackPath := filepath.Join(repoRoot, "faasd", "test", "fns", "nodeinfo", "stack.yaml")
+	stackPath := filepath.Join(repoRoot, "faasd", "test", "fns", "echo-js-remote", "stack.yaml")
 
-	fnName := "nodeinfo"
+	fnName := "echo-js-remote"
 
 	testutil.RemoveFunction(t, fnName, s.baseURL)
 	t.Cleanup(func() { testutil.RemoveFunction(t, fnName, s.baseURL) })
@@ -42,15 +42,19 @@ func (s *ExampleFunctionsSuite) TestRemoteImageNodeInfo() {
 	deployedFn := testutil.WaitForFaasdFunction(t, s.baseURL, s.auth, fnName, 20*time.Second)
 	assert.Equal(t, fnName, deployedFn.Name)
 
-	status, body := testutil.InvokeFaasdFunction(t, s.baseURL, s.auth, fnName, nil)
+	payload := []byte("hello from local image")
+	status, body := testutil.InvokeFaasdFunction(t, s.baseURL, s.auth, fnName, bytes.NewReader(payload))
 	require.Equal(t, http.StatusOK, status)
-	bodyStr := string(body)
-	t.Logf("invoke status: %d, body: \n%s", status, bodyStr)
-	assert.NotEmpty(t, bodyStr)
-	assert.Contains(t, bodyStr, "Hostname")
-	assert.Contains(t, bodyStr, "Platform")
-	assert.Contains(t, bodyStr, "Arch")
-	assert.Contains(t, bodyStr, "CPUs")
+
+	t.Logf("invoke status: %d, body: \n%s", status, string(body))
+	decoded := map[string]any{}
+	require.NoError(t, json.Unmarshal(body, &decoded), "response is not valid JSON: %s", string(body))
+	assert.Equal(t, string(payload), decoded["body"])
+
+	headers, ok := decoded["headers"].(map[string]any)
+	require.True(t, ok, "headers missing in response: %s", string(body))
+	_, hasUserAgent := headers["user-agent"]
+	assert.True(t, hasUserAgent, "expected user-agent header in response")
 }
 
 func (s *ExampleFunctionsSuite) TestLocalBuildPushEchoJS() {

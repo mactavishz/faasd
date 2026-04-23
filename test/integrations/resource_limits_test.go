@@ -32,15 +32,15 @@ func (s *ResourceLimitsSuite) SetupSuite() {
 func (s *ResourceLimitsSuite) TestResourceLimitsInFaasd() {
 	t := s.T()
 	repoRoot := testutil.RepoRoot(t)
-	fixtureDir := filepath.Join(repoRoot, "faasd", "test", "fns", "nodeinfo")
+	fixtureDir := filepath.Join(repoRoot, "faasd", "test", "fns", "echo-js-remote")
 
-	fnName := testutil.UniqueFunctionName("faasd-nodeinfo-limits")
-	fn := testutil.FixtureFunction(t, fixtureDir, "nodeinfo")
+	fnName := testutil.UniqueFunctionName("faasd-echo-js-limits")
+	fn := testutil.FixtureFunction(t, fixtureDir, "echo-js-remote")
 	t.Cleanup(func() { testutil.RemoveFunction(t, fnName, s.baseURL) })
 
 	testutil.DeployFunction(t, s.baseURL, fnName, fn, testutil.DeployOptions{
-		CPULimit:    "50m",
-		MemoryLimit: "96Mi",
+		CPULimit:    "500m",
+		MemoryLimit: "512Mi",
 	})
 
 	payload := []byte("verify resource limits")
@@ -50,16 +50,16 @@ func (s *ResourceLimitsSuite) TestResourceLimitsInFaasd() {
 
 	deployedFn := testutil.WaitForFaasdFunction(t, s.baseURL, s.auth, fnName, 20*time.Second)
 	require.NotNil(t, deployedFn.Limits, "expected limits in /system/functions")
-	assert.Equal(t, "50m", deployedFn.Limits.CPU)
-	assert.Equal(t, "96Mi", deployedFn.Limits.Memory)
+	assert.Equal(t, "500m", deployedFn.Limits.CPU)
+	assert.Equal(t, "512Mi", deployedFn.Limits.Memory)
 
 	info := testutil.WaitForContainerInfo(t, fnName, 20*time.Second)
 	require.NotNil(t, info.Spec.Linux.Resources.Memory.Limit)
 	require.NotNil(t, info.Spec.Linux.Resources.CPU.Quota)
 	require.NotNil(t, info.Spec.Linux.Resources.CPU.Period)
 
-	expectedMemBytes := testutil.MemoryBytes(t, "96Mi")
-	expectedNano := testutil.CPUNano(t, "50m")
+	expectedMemBytes := testutil.MemoryBytes(t, "512Mi")
+	expectedNano := testutil.CPUNano(t, "500m")
 	expectedQuota := testutil.CPUQuotaFromNano(expectedNano, defaultCFSPeriod)
 
 	assert.Equal(t, expectedMemBytes, *info.Spec.Linux.Resources.Memory.Limit)
