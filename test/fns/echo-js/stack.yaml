@@ -12,7 +12,5 @@ functions:
       memory: 256Mi
 configuration:
   templates:
-    - name: python3
-      source: https://github.com/mactavishz/faas-templates
     - name: node24
       source: https://github.com/mactavishz/faas-templates
