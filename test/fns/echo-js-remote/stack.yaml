@@ -3,8 +3,9 @@ provider:
   name: openfaas
   gateway: ${FAASD_GATEWAY_URL:-http://127.0.0.1:8080}
 functions:
-  nodeinfo:
-    image: ghcr.io/openfaas/nodeinfo:latest
+  echo-js-remote:
+    lang: node24
+    image: macsalvation/faasd-echo-js:latest
     limits:
       cpu: 0.25
       memory: 256Mi
