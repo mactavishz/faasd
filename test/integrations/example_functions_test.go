@@ -28,7 +28,7 @@ func (s *ExampleFunctionsSuite) SetupSuite() {
 	s.baseURL, s.auth = testutil.RequireFaasd(s.T())
 }
 
-func (s *ExampleFunctionsSuite) TestRemoteImageNodeInfo() {
+func (s *ExampleFunctionsSuite) TestRemoteImageEchoJS() {
 	t := s.T()
 	repoRoot := testutil.RepoRoot(t)
 	stackPath := filepath.Join(repoRoot, "faasd", "test", "fns", "echo-js-remote", "stack.yaml")
