@@ -14,6 +14,9 @@ import (
 	"github.com/openfaas/faas-provider/types"
 )
 
+// MakeMutateNamespace handles /system/namespace/{namespace} on the provider.
+// The gateway forwards namespace create/read/update/delete requests here, and
+// this handler validates OpenFaaS labels before mutating namespace metadata.
 func MakeMutateNamespace(client *containerd.Client) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {

@@ -16,7 +16,10 @@ import (
 	"github.com/openfaas/faasd/pkg"
 )
 
-func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI) func(w http.ResponseWriter, r *http.Request) {
+// MakeReplicaUpdateHandler handles POST /system/scale-function/{name} on the provider.
+// The gateway scaler forwards scale-up requests here when available replicas are 0,
+// and this handler applies scale-down/scale-up against provider runtime state.
+func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, controller *FaasdAutoScaler) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -56,50 +59,58 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI) func(w h
 
 		name := req.ServiceName
 
-		if _, err := GetFunction(client, name, namespace); err != nil {
-			msg := fmt.Sprintf("function: %s.%s not found", name, namespace)
-			log.Printf("[Scale] %s\n", msg)
-			http.Error(w, msg, http.StatusNotFound)
-			return
+		if _, exists := GetStoredFunction(namespace, name); !exists {
+			if _, err := GetFunction(client, name, namespace); err != nil {
+				msg := fmt.Sprintf("function: %s.%s not found", name, namespace)
+				log.Printf("[Scale] %s\n", msg)
+				http.Error(w, msg, http.StatusNotFound)
+				return
+			}
 		}
 
 		ctx := namespaces.WithNamespace(context.Background(), namespace)
 
 		ctr, ctrErr := client.LoadContainer(ctx, name)
-		if ctrErr != nil {
-			msg := fmt.Sprintf("cannot load service %s, error: %s", name, ctrErr)
-			log.Printf("[Scale] %s\n", msg)
-			http.Error(w, msg, http.StatusNotFound)
-			return
-		}
 
 		var taskExists bool
 		var taskStatus *containerd.Status
 
-		task, taskErr := ctr.Task(ctx, nil)
-		if taskErr != nil {
-			msg := fmt.Sprintf("cannot load task for service %s, error: %s", name, taskErr)
-			log.Printf("[Scale] %s\n", msg)
-			taskExists = false
-		} else {
-			taskExists = true
-			status, statusErr := task.Status(ctx)
-			if statusErr != nil {
-				msg := fmt.Sprintf("cannot load task status for %s, error: %s", name, statusErr)
-				log.Printf("[Scale] %s\n", msg)
-				http.Error(w, msg, http.StatusInternalServerError)
-				return
+		var task containerd.Task
+		if ctrErr == nil {
+			task, taskErr := ctr.Task(ctx, nil)
+			if taskErr != nil {
+				taskExists = false
 			} else {
-				taskStatus = &status
+				taskExists = true
+				status, statusErr := task.Status(ctx)
+				if statusErr != nil {
+					msg := fmt.Sprintf("cannot load task status for %s, error: %s", name, statusErr)
+					log.Printf("[Scale] %s\n", msg)
+					http.Error(w, msg, http.StatusInternalServerError)
+					return
+				} else {
+					taskStatus = &status
+				}
 			}
 		}
 
-		createNewTask := false
-
 		if req.Replicas == 0 {
-			http.Error(w, "replicas must > 0 for faasd CE", http.StatusBadRequest)
+			if controller == nil {
+				http.Error(w, "autoscaler controller not configured", http.StatusInternalServerError)
+				return
+			}
+
+			if err := controller.ScaleDown(namespace, name); err != nil {
+				msg := fmt.Sprintf("cannot scale down service %s, error: %s", name, err)
+				log.Printf("[Scale] %s\n", msg)
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
+
 			return
 		}
+
+		createNewTask := ctrErr != nil
 
 		if taskExists {
 			if taskStatus != nil {
@@ -124,6 +135,15 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI) func(w h
 		}
 
 		if createNewTask {
+			if controller != nil {
+				if err := controller.ScaleUp(namespace, name); err != nil {
+					log.Printf("[Scale] error deploying %s, error: %s\n", name, err)
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				return
+			}
+
 			startInfo, err := createTask(ctx, ctr, cni)
 			if err != nil {
 				log.Printf("[Scale] error deploying %s, error: %s\n", name, err)

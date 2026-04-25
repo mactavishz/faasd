@@ -11,6 +11,9 @@ import (
 	faasd "github.com/openfaas/faasd/pkg"
 )
 
+// MakeNamespacesLister handles GET /system/namespaces on the provider.
+// The gateway forwards namespace list requests here so clients can discover
+// namespaces that are valid for OpenFaaS function operations.
 func MakeNamespacesLister(client *containerd.Client) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		list := ListNamespaces(client)

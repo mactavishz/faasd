@@ -11,6 +11,9 @@ import (
 	"github.com/openfaas/faas-provider/types"
 )
 
+// MakeReadHandler handles GET /system/functions on the faasd provider.
+// The gateway forwards list requests here, and this handler returns function
+// status per namespace from store-backed metadata plus runtime availability.
 func MakeReadHandler(client *containerd.Client) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -29,38 +32,42 @@ func MakeReadHandler(client *containerd.Client) func(w http.ResponseWriter, r *h
 		}
 
 		res := []types.FunctionStatus{}
-		fns, err := ListFunctions(client, lookupNamespace)
-		if err != nil {
-			log.Printf("[Read] error listing functions. Error: %s", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		stored := ListStoredFunctions(lookupNamespace)
+		if len(stored) == 0 {
+			fns, err := ListFunctions(client, lookupNamespace)
+			if err != nil {
+				log.Printf("[Read] error listing functions. Error: %s", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			for _, fn := range fns {
+				storedFn := NewStoredFunctionFromRuntime(*fn)
+				stored = append(stored, storedFn)
+				getFunctionStore().Put(storedFn)
+			}
 		}
 
-		for _, fn := range fns {
-			annotations := &fn.annotations
-			labels := &fn.labels
-			memory := resource.NewQuantity(fn.memoryLimit, resource.BinarySI)
-			cpu := resource.NewScaledQuantity(fn.cpuLimit, resource.Nano)
-			status := types.FunctionStatus{
-				Name:        fn.name,
-				Image:       fn.image,
-				Replicas:    uint64(fn.replicas),
-				Namespace:   fn.namespace,
-				Labels:      labels,
-				Annotations: annotations,
-				Secrets:     fn.secrets,
-				EnvVars:     fn.envVars,
-				EnvProcess:  fn.envProcess,
-				CreatedAt:   fn.createdAt,
+		for _, fn := range stored {
+			status := BuildFunctionStatus(client, fn)
+			if status.Limits != nil {
+				memory := resource.NewQuantity(0, resource.BinarySI)
+				cpu := resource.NewScaledQuantity(0, resource.Nano)
+				if status.Limits.Memory != "" {
+					if parsed, err := resource.ParseQuantity(status.Limits.Memory); err == nil {
+						memory = &parsed
+					}
+				}
+				if status.Limits.CPU != "" {
+					if parsed, err := resource.ParseQuantity(status.Limits.CPU); err == nil {
+						cpu = &parsed
+					}
+				}
+				limit := &types.FunctionResources{Memory: memory.String(), CPU: cpu.String()}
+				if limit.Memory == "0" && limit.CPU == "0" {
+					status.Limits = nil
+				}
 			}
-
-			// Do not remove below memory check for 0
-			// Memory limit should not be included in status until set explicitly
-			limit := &types.FunctionResources{Memory: memory.String(), CPU: cpu.String()}
-			if limit.Memory != "0" || limit.CPU != "0" {
-				status.Limits = limit
-			}
-
 			res = append(res, status)
 		}
 

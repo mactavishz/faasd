@@ -9,6 +9,7 @@ import (
 	"path"
 
 	"github.com/containerd/containerd"
+	"github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/autoscaler"
 	bootstrap "github.com/openfaas/faas-provider"
 	"github.com/openfaas/faas-provider/logs"
 	"github.com/openfaas/faas-provider/proxy"
@@ -73,8 +74,6 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 
 	defer client.Close()
 
-	invokeResolver := handlers.NewInvokeResolver(client)
-
 	baseUserSecretsPath := path.Join(wd, "secrets")
 	if err := moveSecretsToDefaultNamespaceSecrets(
 		baseUserSecretsPath,
@@ -82,15 +81,42 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 		return err
 	}
 
+	store := handlers.NewInMemoryFunctionStore()
+	handlers.SetFunctionStore(store)
+	handlers.BootstrapFunctionStore(client, store, faasd.DefaultFunctionNamespace)
+
+	autoScalerConfig, err := autoscaler.NewConfigFromEnv("faasd")
+	if err != nil {
+		return err
+	}
+
+	controller := handlers.NewFaasdAutoScaler(client, cni, store, baseUserSecretsPath, true, autoScalerConfig)
+	handlers.SetAutoScalerController(controller)
+	defer controller.Stop()
+
+	if autoScalerConfig.Enabled {
+		log.Printf("Autoscaler enabled")
+		for _, fn := range store.List(faasd.DefaultFunctionNamespace) {
+			controller.RegisterFunction(faasd.DefaultFunctionNamespace, fn.Name, fn.Labels)
+			status := handlers.BuildFunctionStatus(client, fn)
+			controller.MarkScaledDown(faasd.DefaultFunctionNamespace, fn.Name, status.AvailableReplicas == 0)
+		}
+		controller.Start()
+	} else {
+		log.Printf("Autoscaler disabled")
+	}
+
+	invokeResolver := handlers.NewInvokeResolver(client)
+
 	alwaysPull := true
 	bootstrapHandlers := types.FaaSHandlers{
 		FunctionProxy:   httpHeaderMiddleware(proxy.NewHandlerFunc(*config, invokeResolver, false)),
-		DeleteFunction:  httpHeaderMiddleware(handlers.MakeDeleteHandler(client, cni)),
-		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull)),
+		DeleteFunction:  httpHeaderMiddleware(handlers.MakeDeleteHandler(client, cni, controller)),
+		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, controller)),
 		FunctionLister:  httpHeaderMiddleware(handlers.MakeReadHandler(client)),
 		FunctionStatus:  httpHeaderMiddleware(handlers.MakeReplicaReaderHandler(client)),
-		ScaleFunction:   httpHeaderMiddleware(handlers.MakeReplicaUpdateHandler(client, cni)),
-		UpdateFunction:  httpHeaderMiddleware(handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull)),
+		ScaleFunction:   httpHeaderMiddleware(handlers.MakeReplicaUpdateHandler(client, cni, controller)),
+		UpdateFunction:  httpHeaderMiddleware(handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, controller)),
 		Health:          httpHeaderMiddleware(func(w http.ResponseWriter, r *http.Request) {}),
 		Info:            httpHeaderMiddleware(handlers.MakeInfoHandler(faasd.Version, faasd.GitCommit)),
 		ListNamespaces:  httpHeaderMiddleware(handlers.MakeNamespacesLister(client)),

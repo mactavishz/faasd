@@ -6,9 +6,11 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/gorilla/mux"
-	"github.com/openfaas/faas-provider/types"
 )
 
+// MakeReplicaReaderHandler handles GET /system/function/{name} on the provider.
+// The gateway forwards single-function status lookups here, including scale-
+// from-zero polling paths that need desired vs available replica state.
 func MakeReplicaReaderHandler(client *containerd.Client) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -28,27 +30,26 @@ func MakeReplicaReaderHandler(client *containerd.Client) func(w http.ResponseWri
 			return
 		}
 
-		if f, err := GetFunction(client, functionName, lookupNamespace); err == nil {
-			found := types.FunctionStatus{
-				Name:              functionName,
-				Image:             f.image,
-				AvailableReplicas: uint64(f.replicas),
-				Replicas:          uint64(f.replicas),
-				Namespace:         f.namespace,
-				Labels:            &f.labels,
-				Annotations:       &f.annotations,
-				Secrets:           f.secrets,
-				EnvVars:           f.envVars,
-				EnvProcess:        f.envProcess,
-				CreatedAt:         f.createdAt,
-			}
-
+		if stored, ok := GetStoredFunction(lookupNamespace, functionName); ok {
+			found := BuildFunctionStatus(client, stored)
 			functionBytes, _ := json.Marshal(found)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			w.Write(functionBytes)
-		} else {
-			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+
+		if f, err := GetFunction(client, functionName, lookupNamespace); err == nil {
+			stored := NewStoredFunctionFromRuntime(f)
+			getFunctionStore().Put(stored)
+			found := BuildFunctionStatus(client, stored)
+			functionBytes, _ := json.Marshal(found)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write(functionBytes)
+			return
+		}
+
+		w.WriteHeader(http.StatusNotFound)
 	}
 }

@@ -17,6 +17,9 @@ import (
 const secretFilePermission = 0644
 const secretDirPermission = 0755
 
+// MakeSecretHandler handles /system/secrets on the provider.
+// The gateway forwards secret management requests here, and this handler maps
+// namespace-scoped secret CRUD operations to the provider's secrets mount path.
 func MakeSecretHandler(store provider.Labeller, mountPath string) func(w http.ResponseWriter, r *http.Request) {
 
 	err := os.MkdirAll(mountPath, secretFilePermission)

@@ -35,8 +35,10 @@ const (
 	faasdGatewayURLEnv             = "FAASD_GATEWAY_URL"
 )
 
-// MakeDeployHandler returns a handler to deploy a function
-func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) func(w http.ResponseWriter, r *http.Request) {
+// MakeDeployHandler handles POST /system/functions on the faasd provider.
+// The gateway forwards deploy requests here, and this handler validates input,
+// creates function runtime resources, then stores metadata for status/scaling.
+func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, controller *FaasdAutoScaler) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		if r.Body == nil {
@@ -92,6 +94,12 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			log.Printf("[Deploy] error deploying %s, error: %s\n", name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+
+		stored := PutFunctionFromDeployment(req, namespace)
+		if controller != nil {
+			controller.RegisterFunction(namespace, name, ensureFunctionLabelsForAutoscaler(stored.Labels))
+			controller.MarkScaledDown(namespace, name, false)
 		}
 	}
 }

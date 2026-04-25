@@ -15,7 +15,9 @@ const (
 	ProviderName = "faasd-ce"
 )
 
-// MakeInfoHandler creates handler for /system/info endpoint
+// MakeInfoHandler handles GET /system/info on the faasd provider.
+// The gateway forwards provider info requests here to expose provider/version
+// metadata for CLI and system diagnostics.
 func MakeInfoHandler(version, sha string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {

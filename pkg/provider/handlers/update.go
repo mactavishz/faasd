@@ -17,7 +17,10 @@ import (
 	"github.com/openfaas/faasd/pkg/service"
 )
 
-func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) func(w http.ResponseWriter, r *http.Request) {
+// MakeUpdateHandler handles PUT /system/functions on the faasd provider.
+// The gateway forwards update requests here, and this handler redeploys the
+// function runtime and refreshes stored metadata/autoscaler state.
+func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, controller *FaasdAutoScaler) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -102,6 +105,12 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			log.Printf("[Update] error deploying %s, error: %s\n", name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+
+		stored := PutFunctionFromDeployment(req, namespace)
+		if controller != nil {
+			controller.RegisterFunction(namespace, name, ensureFunctionLabelsForAutoscaler(stored.Labels))
+			controller.MarkScaledDown(namespace, name, false)
 		}
 	}
 }

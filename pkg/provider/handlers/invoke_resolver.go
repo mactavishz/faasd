@@ -20,6 +20,9 @@ func NewInvokeResolver(client *containerd.Client) *InvokeResolver {
 	return &InvokeResolver{client: client}
 }
 
+// Resolve is used by the provider function proxy path behind the gateway.
+// After the gateway forwards /function/* invokes to the provider, Resolve maps
+// a function name (with optional namespace suffix) to a concrete watchdog URL.
 func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 	actualFunctionName := functionName
 	log.Printf("Resolve: %q\n", actualFunctionName)
