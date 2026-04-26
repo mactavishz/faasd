@@ -20,6 +20,7 @@ import (
 	"github.com/containerd/containerd/oci"
 	gocni "github.com/containerd/go-cni"
 	"github.com/distribution/reference"
+	"github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/autoscaler"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/openfaas/faas-provider/types"
 	cninetwork "github.com/openfaas/faasd/pkg/cninetwork"
@@ -98,8 +99,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		stored := PutFunctionFromDeployment(req, namespace)
 		if controller != nil {
-			controller.RegisterFunction(namespace, name, ensureFunctionLabelsForAutoscaler(stored.Labels))
-			controller.MarkScaledDown(namespace, name, false)
+			controller.RegisterFunctionWithState(namespace, name, ensureFunctionLabelsForAutoscaler(stored.Labels), autoscaler.StateActive)
 		}
 	}
 }

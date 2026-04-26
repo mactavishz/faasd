@@ -15,7 +15,6 @@ import (
 	"github.com/openfaas/faasd/pkg/cninetwork"
 	"github.com/openfaas/faasd/pkg/service"
 	"go.uber.org/zap"
-	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -33,7 +32,6 @@ type FaasdAutoScaler struct {
 	alwaysPull     bool
 	logger         *zap.Logger
 	autoScaler     *autoscaler.AutoScaler
-	scaleUpGroup   singleflight.Group
 }
 
 type faasdScaleOperation struct {
@@ -105,17 +103,14 @@ func (f *FaasdAutoScaler) Enabled() bool {
 }
 
 func (f *FaasdAutoScaler) RegisterFunction(namespace, name string, labels map[string]string) {
-	if !f.Enabled() {
-		return
-	}
-	f.autoScaler.RegisterFunction(f.scaleKey(namespace, name), labels)
+	f.RegisterFunctionWithState(namespace, name, labels, autoscaler.StateActive)
 }
 
-func (f *FaasdAutoScaler) MarkScaledDown(namespace, name string, scaledDown bool) {
+func (f *FaasdAutoScaler) RegisterFunctionWithState(namespace, name string, labels map[string]string, state autoscaler.LifecycleState) {
 	if !f.Enabled() {
 		return
 	}
-	f.autoScaler.MarkScaledDown(f.scaleKey(namespace, name), scaledDown)
+	f.autoScaler.RegisterFunctionWithState(f.scaleKey(namespace, name), labels, state)
 }
 
 func (f *FaasdAutoScaler) UnregisterFunction(namespace, name string) {
@@ -133,10 +128,26 @@ func (f *FaasdAutoScaler) RecordActivity(namespace, name string) {
 }
 
 func (f *FaasdAutoScaler) ScaleUp(namespace, name string) error {
-	_, err, _ := f.scaleUpGroup.Do(f.scaleKey(namespace, name), func() (any, error) {
-		return nil, f.scaleUpLocked(namespace, name)
-	})
-	return err
+	if f == nil {
+		return fmt.Errorf("autoscaler controller not configured")
+	}
+	if !f.Enabled() {
+		return nil
+	}
+
+	if err := f.autoScaler.ScaleUpWhenReady(context.Background(), f.scaleKey(namespace, name)); err != nil {
+		return err
+	}
+
+	if f.client == nil {
+		return nil
+	}
+
+	if f.runtimeAvailable(namespace, name) {
+		return nil
+	}
+
+	return f.restoreRuntime(namespace, name)
 }
 
 func (f *FaasdAutoScaler) ScaleDown(namespace, name string) error {
@@ -160,16 +171,25 @@ func (f *FaasdAutoScaler) ScaleDown(namespace, name string) error {
 		return err
 	}
 
-	if f.Enabled() {
-		f.autoScaler.MarkScaledDown(f.scaleKey(namespace, name), true)
-	}
-
 	return nil
 }
 
-func (f *FaasdAutoScaler) scaleUpLocked(namespace, name string) error {
+func (f *FaasdAutoScaler) ScaleDownWhenIdle(namespace, name string) error {
 	if f == nil {
 		return fmt.Errorf("autoscaler controller not configured")
+	}
+	if !f.Enabled() {
+		return nil
+	}
+	return f.autoScaler.ScaleDownWhenIdle(context.Background(), f.scaleKey(namespace, name))
+}
+
+func (f *FaasdAutoScaler) restoreRuntime(namespace, name string) error {
+	if f == nil {
+		return fmt.Errorf("autoscaler controller not configured")
+	}
+	if f.client == nil {
+		return fmt.Errorf("containerd client not configured")
 	}
 
 	stored, ok := f.store.Get(namespace, name)
@@ -190,13 +210,34 @@ func (f *FaasdAutoScaler) scaleUpLocked(namespace, name string) error {
 		return err
 	}
 
-	if f.Enabled() {
-		key := f.scaleKey(namespace, name)
-		f.autoScaler.MarkScaledDown(key, false)
-		f.autoScaler.RecordActivity(key)
+	return nil
+}
+
+func (f *FaasdAutoScaler) runtimeAvailable(namespace, name string) bool {
+	if f == nil || f.client == nil {
+		return false
 	}
 
-	return nil
+	function, err := GetFunction(f.client, name, namespace)
+	if err != nil {
+		return false
+	}
+
+	return function.replicas > 0
+}
+
+func (f *FaasdAutoScaler) StartInvocation(namespace, name string) error {
+	if !f.Enabled() {
+		return nil
+	}
+	return f.autoScaler.StartInvocation(f.scaleKey(namespace, name))
+}
+
+func (f *FaasdAutoScaler) EndInvocation(namespace, name string) {
+	if !f.Enabled() {
+		return
+	}
+	f.autoScaler.EndInvocation(f.scaleKey(namespace, name))
 }
 
 func (f *FaasdAutoScaler) scaleKey(namespace, name string) string {
@@ -224,7 +265,7 @@ func (f *faasdScaleOperation) ScaleUp(functionKey string) error {
 	if namespace == "" {
 		namespace = getRequestNamespace("")
 	}
-	return f.controller.ScaleUp(namespace, name)
+	return f.controller.restoreRuntime(namespace, name)
 }
 
 func BootstrapFunctionStore(client *containerd.Client, store FunctionStore, namespace string) {

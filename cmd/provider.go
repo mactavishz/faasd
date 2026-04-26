@@ -96,11 +96,6 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 
 	if autoScalerConfig.Enabled {
 		log.Printf("Autoscaler enabled")
-		for _, fn := range store.List(faasd.DefaultFunctionNamespace) {
-			controller.RegisterFunction(faasd.DefaultFunctionNamespace, fn.Name, fn.Labels)
-			status := handlers.BuildFunctionStatus(client, fn)
-			controller.MarkScaledDown(faasd.DefaultFunctionNamespace, fn.Name, status.AvailableReplicas == 0)
-		}
 		controller.Start()
 	} else {
 		log.Printf("Autoscaler disabled")
@@ -110,7 +105,7 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 
 	alwaysPull := true
 	bootstrapHandlers := types.FaaSHandlers{
-		FunctionProxy:   httpHeaderMiddleware(proxy.NewHandlerFunc(*config, invokeResolver, false)),
+		FunctionProxy:   httpHeaderMiddleware(proxy.NewHandlerFuncWithLifecycle(*config, invokeResolver, false, handlers.NewInvokeLifecycle(controller))),
 		DeleteFunction:  httpHeaderMiddleware(handlers.MakeDeleteHandler(client, cni, controller)),
 		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, controller)),
 		FunctionLister:  httpHeaderMiddleware(handlers.MakeReadHandler(client)),

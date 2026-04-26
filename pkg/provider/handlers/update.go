@@ -7,10 +7,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
 	gocni "github.com/containerd/go-cni"
+	"github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/autoscaler"
 	"github.com/openfaas/faas-provider/types"
 
 	"github.com/openfaas/faasd/pkg/cninetwork"
@@ -76,6 +78,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		err = validateSecrets(namespaceSecretMountPath, req.Secrets)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		ctx := namespaces.WithNamespace(context.Background(), namespace)
@@ -83,6 +86,41 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		if _, err := prepull(ctx, req, client, alwaysPull); err != nil {
 			log.Printf("[Update] error with pre-pull: %s, %s\n", name, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		newStored := NewStoredFunctionFromDeployment(req, namespace)
+		previousStored, hadPrevious := GetStoredFunction(namespace, name)
+		if !hadPrevious {
+			previousStored = NewStoredFunctionFromRuntime(function)
+		}
+
+		if controller != nil && controller.Enabled() {
+			store := getFunctionStore()
+			store.Put(newStored)
+
+			if err := controller.ScaleDownWhenIdle(namespace, name); err != nil {
+				if strings.Contains(err.Error(), "not registered") {
+					controller.RegisterFunctionWithState(namespace, name, ensureFunctionLabelsForAutoscaler(newStored.Labels), autoscaler.StateActive)
+					err = controller.ScaleDownWhenIdle(namespace, name)
+				}
+				if err != nil {
+					store.Put(previousStored)
+					msg := fmt.Sprintf("cannot safely scale down function %s.%s for update: %s", name, namespace, err)
+					log.Printf("[Update] %s\n", msg)
+					http.Error(w, msg, http.StatusBadRequest)
+					return
+				}
+			}
+
+			if err := controller.ScaleUp(namespace, name); err != nil {
+				store.Put(previousStored)
+				log.Printf("[Update] error scaling up %s after update, error: %s\n", name, err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			return
 		}
 
 		if function.replicas != 0 {
@@ -107,10 +145,6 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			return
 		}
 
-		stored := PutFunctionFromDeployment(req, namespace)
-		if controller != nil {
-			controller.RegisterFunction(namespace, name, ensureFunctionLabelsForAutoscaler(stored.Labels))
-			controller.MarkScaledDown(namespace, name, false)
-		}
+		PutFunctionFromDeployment(req, namespace)
 	}
 }

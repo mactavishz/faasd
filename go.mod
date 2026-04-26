@@ -33,7 +33,6 @@ require (
 require (
 	github.com/alexellis/go-execute/v2 v2.2.1
 	github.com/distribution/reference v0.6.0
-	golang.org/x/sync v0.12.0
 )
 
 require (
@@ -101,6 +100,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.21.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/genproto v0.0.0-20231211222908-989df2bf70f3 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240401170217-c3f982113cda // indirect
@@ -114,6 +114,8 @@ require (
 )
 
 replace github.com/openfaas/go-sdk => ../go-sdk
+
+replace github.com/openfaas/faas-provider => ../faas-provider
 
 replace github.com/mactavishz/FaaS-Platform-Knowledge-Optimization => ..
 

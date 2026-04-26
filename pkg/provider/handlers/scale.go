@@ -100,7 +100,7 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, controll
 				return
 			}
 
-			if err := controller.ScaleDown(namespace, name); err != nil {
+			if err := controller.ScaleDownWhenIdle(namespace, name); err != nil {
 				msg := fmt.Sprintf("cannot scale down service %s, error: %s", name, err)
 				log.Printf("[Scale] %s\n", msg)
 				http.Error(w, msg, http.StatusBadRequest)

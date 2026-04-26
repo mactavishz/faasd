@@ -100,8 +100,7 @@ func TestFaasdAutoScaler_DisabledMethodsAreNoop(t *testing.T) {
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: false, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
 	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 
-	controller.RegisterFunction("openfaas-fn", "fn", map[string]string{"k": "v"})
-	controller.MarkScaledDown("openfaas-fn", "fn", true)
+	controller.RegisterFunctionWithState("openfaas-fn", "fn", map[string]string{"k": "v"}, autoscaler.StateScaledDown)
 	controller.RecordActivity("openfaas-fn", "fn")
 	controller.UnregisterFunction("openfaas-fn", "fn")
 
@@ -114,7 +113,7 @@ func TestFaasdAutoScaler_EnabledMethodsDelegateToAutoscaler(t *testing.T) {
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
 	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 
-	controller.RegisterFunction("openfaas-fn", "fn", map[string]string{"com.openfaas.scale.zero": "true"})
+	controller.RegisterFunctionWithState("openfaas-fn", "fn", map[string]string{"com.openfaas.scale.zero": "true"}, autoscaler.StateScaledDown)
 	key := controller.scaleKey("openfaas-fn", "fn")
 
 	statuses := controller.autoScaler.GetFunctionStatus()
@@ -122,9 +121,12 @@ func TestFaasdAutoScaler_EnabledMethodsDelegateToAutoscaler(t *testing.T) {
 		t.Fatalf("expected registered function key %q in autoscaler status", key)
 	}
 
-	controller.MarkScaledDown("openfaas-fn", "fn", true)
-	if !controller.autoScaler.IsScaledDown(key) {
-		t.Fatal("expected function to be marked scaled down")
+	state, ok := controller.autoScaler.GetState(key)
+	if !ok {
+		t.Fatalf("expected state for %q", key)
+	}
+	if state != autoscaler.StateScaledDown {
+		t.Fatalf("expected scaled-down state, got %s", state)
 	}
 
 	beforeStatus := controller.autoScaler.GetFunctionStatus()[key]
@@ -178,5 +180,34 @@ func TestEnsureFunctionLabelsForAutoscaler_NilInputReturnsEmptyMap(t *testing.T)
 	out["k"] = "v"
 	if len(out) != 1 {
 		t.Fatalf("expected map to be writable, got len=%d", len(out))
+	}
+}
+
+func TestStartEndInvocationTransitionsToBlockedAndBack(t *testing.T) {
+	cfg := autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
+	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
+	controller.RegisterFunctionWithState("openfaas-fn", "fn", map[string]string{"com.openfaas.scale.zero": "true"}, autoscaler.StateActive)
+
+	err := controller.StartInvocation("openfaas-fn", "fn")
+	if err != nil {
+		t.Fatalf("expected start invocation to succeed, got %v", err)
+	}
+
+	key := controller.scaleKey("openfaas-fn", "fn")
+	state, ok := controller.autoScaler.GetState(key)
+	if !ok {
+		t.Fatal("expected function state")
+	}
+	if state != autoscaler.StateBlocked {
+		t.Fatalf("expected blocked state, got %s", state)
+	}
+
+	controller.EndInvocation("openfaas-fn", "fn")
+	state, ok = controller.autoScaler.GetState(key)
+	if !ok {
+		t.Fatal("expected function state after end")
+	}
+	if state != autoscaler.StateActive {
+		t.Fatalf("expected active state, got %s", state)
 	}
 }
