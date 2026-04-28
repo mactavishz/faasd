@@ -71,6 +71,14 @@ destroy_ctr_namespace() {
         printf '%s\n' "$containers" | for_each_line remove_container
     fi
 
+    if [ "$NS" == "openfaas" ]; then
+        # Special handling for openfaas namespace
+        # Tasks/containers are already removed above. For core faasd services, we keep
+        # snapshots/images/namespace so rebuilds can reuse cached images and avoid
+        # repeated pulls (and potential Docker Hub rate-limit failures).
+        return 0
+    fi
+
     # Delete snapshots (The writable layers)
     # Do not pass --snapshotter here for compatibility with older ctr builds.
     echo "Purging snapshots..."
