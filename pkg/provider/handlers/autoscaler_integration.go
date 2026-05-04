@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
@@ -21,10 +22,10 @@ var (
 	storeMu             sync.RWMutex
 	activeFunctionStore FunctionStore = NewInMemoryFunctionStore()
 	autoscalerMu        sync.RWMutex
-	activeAutoScaler    *FaasdAutoScaler
+	activeAutoScaler    *FaasdAutoScalerController
 )
 
-type FaasdAutoScaler struct {
+type FaasdAutoScalerController struct {
 	client         *containerd.Client
 	cni            gocni.CNI
 	store          FunctionStore
@@ -35,7 +36,7 @@ type FaasdAutoScaler struct {
 }
 
 type faasdScaleOperation struct {
-	controller *FaasdAutoScaler
+	controller *FaasdAutoScalerController
 }
 
 func SetFunctionStore(store FunctionStore) {
@@ -54,21 +55,21 @@ func getFunctionStore() FunctionStore {
 	return activeFunctionStore
 }
 
-func SetAutoScalerController(controller *FaasdAutoScaler) {
+func SetAutoScalerController(controller *FaasdAutoScalerController) {
 	autoscalerMu.Lock()
 	activeAutoScaler = controller
 	autoscalerMu.Unlock()
 }
 
-func getAutoScalerController() *FaasdAutoScaler {
+func getAutoScalerController() *FaasdAutoScalerController {
 	autoscalerMu.RLock()
 	defer autoscalerMu.RUnlock()
 	return activeAutoScaler
 }
 
-func NewFaasdAutoScaler(client *containerd.Client, cni gocni.CNI, store FunctionStore, baseSecretPath string, alwaysPull bool, cfg autoscaler.Config) *FaasdAutoScaler {
+func NewFaasdAutoScalerController(client *containerd.Client, cni gocni.CNI, store FunctionStore, baseSecretPath string, alwaysPull bool, cfg autoscaler.Config) *FaasdAutoScalerController {
 	logger := zap.NewNop()
-	controller := &FaasdAutoScaler{
+	controller := &FaasdAutoScalerController{
 		client:         client,
 		cni:            cni,
 		store:          store,
@@ -81,59 +82,65 @@ func NewFaasdAutoScaler(client *containerd.Client, cni gocni.CNI, store Function
 	return controller
 }
 
-func (f *FaasdAutoScaler) Start() {
+func (f *FaasdAutoScalerController) Start() {
 	if f == nil || f.autoScaler == nil {
 		return
 	}
 	f.autoScaler.Start()
 }
 
-func (f *FaasdAutoScaler) Stop() {
+func (f *FaasdAutoScalerController) Stop() {
 	if f == nil || f.autoScaler == nil {
 		return
 	}
 	f.autoScaler.Stop()
 }
 
-func (f *FaasdAutoScaler) Enabled() bool {
+func (f *FaasdAutoScalerController) Enabled() bool {
 	if f == nil || f.autoScaler == nil {
 		return false
 	}
 	return f.autoScaler.IsEnabled()
 }
 
-func (f *FaasdAutoScaler) RegisterFunction(namespace, name string, labels map[string]string) {
+func (f *FaasdAutoScalerController) RegisterFunction(namespace, name string, labels map[string]string) {
 	f.RegisterFunctionWithState(namespace, name, labels, autoscaler.StateActive)
 }
 
-func (f *FaasdAutoScaler) RegisterFunctionWithState(namespace, name string, labels map[string]string, state autoscaler.LifecycleState) {
+func (f *FaasdAutoScalerController) RegisterFunctionWithState(namespace, name string, labels map[string]string, state autoscaler.LifecycleState) {
 	if !f.Enabled() {
 		return
 	}
 	f.autoScaler.RegisterFunctionWithState(f.scaleKey(namespace, name), labels, state)
 }
 
-func (f *FaasdAutoScaler) UnregisterFunction(namespace, name string) {
+func (f *FaasdAutoScalerController) UnregisterFunction(namespace, name string) {
 	if !f.Enabled() {
 		return
 	}
 	f.autoScaler.UnregisterFunction(f.scaleKey(namespace, name))
 }
 
-func (f *FaasdAutoScaler) RecordActivity(namespace, name string) {
+func (f *FaasdAutoScalerController) RecordActivity(namespace, name string) {
 	if !f.Enabled() {
 		return
 	}
 	f.autoScaler.RecordActivity(f.scaleKey(namespace, name))
 }
 
-func (f *FaasdAutoScaler) ScaleUp(namespace, name string) error {
+func (f *FaasdAutoScalerController) ScaleUp(namespace, name string) error {
+	return f.ScaleUpWithMode(namespace, name, true)
+}
+
+func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold bool) error {
 	if f == nil {
 		return fmt.Errorf("autoscaler controller not configured")
 	}
 	if !f.Enabled() {
 		return nil
 	}
+
+	start := time.Now()
 
 	if err := f.autoScaler.ScaleUpWhenReady(context.Background(), f.scaleKey(namespace, name)); err != nil {
 		return err
@@ -144,16 +151,39 @@ func (f *FaasdAutoScaler) ScaleUp(namespace, name string) error {
 	}
 
 	if f.runtimeAvailable(namespace, name) {
+		if callgraphController := getCallGraphController(); callgraphController != nil {
+			labels := map[string]string(nil)
+			if stored, ok := f.store.Get(namespace, name); ok {
+				labels = stored.Labels
+			}
+			callgraphController.recordScaleUp(name, time.Since(start), cold)
+			RegisterCallGraphFunction(f.client, namespace, name, labels)
+		}
 		return nil
 	}
 
-	return f.restoreRuntime(namespace, name)
+	if err := f.restoreRuntime(namespace, name); err != nil {
+		return err
+	}
+
+	if callGraphController := getCallGraphController(); callGraphController != nil {
+		labels := map[string]string(nil)
+		if stored, ok := f.store.Get(namespace, name); ok {
+			labels = stored.Labels
+		}
+		callGraphController.recordScaleUp(name, time.Since(start), cold)
+		RegisterCallGraphFunction(f.client, namespace, name, labels)
+	}
+
+	return nil
 }
 
-func (f *FaasdAutoScaler) ScaleDown(namespace, name string) error {
+func (f *FaasdAutoScalerController) ScaleDown(namespace, name string) error {
 	if f == nil {
 		return fmt.Errorf("autoscaler controller not configured")
 	}
+
+	start := time.Now()
 
 	ctx := namespaces.WithNamespace(context.Background(), namespace)
 	if function, err := GetFunction(f.client, name, namespace); err == nil {
@@ -171,10 +201,15 @@ func (f *FaasdAutoScaler) ScaleDown(namespace, name string) error {
 		return err
 	}
 
+	if callGraphController := getCallGraphController(); callGraphController != nil {
+		callGraphController.recordScaleDown(name, time.Since(start))
+		callGraphController.markFunctionInactive(namespace, name)
+	}
+
 	return nil
 }
 
-func (f *FaasdAutoScaler) ScaleDownWhenIdle(namespace, name string) error {
+func (f *FaasdAutoScalerController) ScaleDownWhenIdle(namespace, name string) error {
 	if f == nil {
 		return fmt.Errorf("autoscaler controller not configured")
 	}
@@ -184,7 +219,7 @@ func (f *FaasdAutoScaler) ScaleDownWhenIdle(namespace, name string) error {
 	return f.autoScaler.ScaleDownWhenIdle(context.Background(), f.scaleKey(namespace, name))
 }
 
-func (f *FaasdAutoScaler) restoreRuntime(namespace, name string) error {
+func (f *FaasdAutoScalerController) restoreRuntime(namespace, name string) error {
 	if f == nil {
 		return fmt.Errorf("autoscaler controller not configured")
 	}
@@ -213,7 +248,7 @@ func (f *FaasdAutoScaler) restoreRuntime(namespace, name string) error {
 	return nil
 }
 
-func (f *FaasdAutoScaler) runtimeAvailable(namespace, name string) bool {
+func (f *FaasdAutoScalerController) runtimeAvailable(namespace, name string) bool {
 	if f == nil || f.client == nil {
 		return false
 	}
@@ -226,25 +261,25 @@ func (f *FaasdAutoScaler) runtimeAvailable(namespace, name string) bool {
 	return function.replicas > 0
 }
 
-func (f *FaasdAutoScaler) StartInvocation(namespace, name string) error {
+func (f *FaasdAutoScalerController) StartInvocation(namespace, name string) error {
 	if !f.Enabled() {
 		return nil
 	}
 	return f.autoScaler.StartInvocation(f.scaleKey(namespace, name))
 }
 
-func (f *FaasdAutoScaler) EndInvocation(namespace, name string) {
+func (f *FaasdAutoScalerController) EndInvocation(namespace, name string) {
 	if !f.Enabled() {
 		return
 	}
 	f.autoScaler.EndInvocation(f.scaleKey(namespace, name))
 }
 
-func (f *FaasdAutoScaler) scaleKey(namespace, name string) string {
+func (f *FaasdAutoScalerController) scaleKey(namespace, name string) string {
 	return namespace + "/" + name
 }
 
-func (f *FaasdAutoScaler) parseScaleKey(key string) (string, string) {
+func (f *FaasdAutoScalerController) parseScaleKey(key string) (string, string) {
 	parts := strings.SplitN(key, "/", 2)
 	if len(parts) != 2 {
 		return "", key

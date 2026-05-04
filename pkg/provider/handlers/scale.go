@@ -19,7 +19,7 @@ import (
 // MakeReplicaUpdateHandler handles POST /system/scale-function/{name} on the provider.
 // The gateway scaler forwards scale-up requests here when available replicas are 0,
 // and this handler applies scale-down/scale-up against provider runtime state.
-func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, controller *FaasdAutoScaler) func(w http.ResponseWriter, r *http.Request) {
+func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -95,16 +95,20 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, controll
 		}
 
 		if req.Replicas == 0 {
-			if controller == nil {
+			if autoScalerController == nil {
 				http.Error(w, "autoscaler controller not configured", http.StatusInternalServerError)
 				return
 			}
 
-			if err := controller.ScaleDownWhenIdle(namespace, name); err != nil {
+			if err := autoScalerController.ScaleDownWhenIdle(namespace, name); err != nil {
 				msg := fmt.Sprintf("cannot scale down service %s, error: %s", name, err)
 				log.Printf("[Scale] %s\n", msg)
 				http.Error(w, msg, http.StatusBadRequest)
 				return
+			}
+
+			if callGraphController != nil {
+				callGraphController.markFunctionInactive(namespace, name)
 			}
 
 			return
@@ -135,8 +139,8 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, controll
 		}
 
 		if createNewTask {
-			if controller != nil {
-				if err := controller.ScaleUp(namespace, name); err != nil {
+			if autoScalerController != nil {
+				if err := autoScalerController.ScaleUp(namespace, name); err != nil {
 					log.Printf("[Scale] error deploying %s, error: %s\n", name, err)
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return

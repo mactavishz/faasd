@@ -10,7 +10,9 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/autoscaler"
+	"github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/callgraph"
 	bootstrap "github.com/openfaas/faas-provider"
+	"github.com/openfaas/faas-provider/auth"
 	"github.com/openfaas/faas-provider/logs"
 	"github.com/openfaas/faas-provider/proxy"
 	"github.com/openfaas/faas-provider/types"
@@ -90,28 +92,44 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 		return err
 	}
 
-	controller := handlers.NewFaasdAutoScaler(client, cni, store, baseUserSecretsPath, true, autoScalerConfig)
-	handlers.SetAutoScalerController(controller)
-	defer controller.Stop()
+	autoScalerController := handlers.NewFaasdAutoScalerController(client, cni, store, baseUserSecretsPath, true, autoScalerConfig)
+	handlers.SetAutoScalerController(autoScalerController)
 
 	if autoScalerConfig.Enabled {
 		log.Printf("Autoscaler enabled")
-		controller.Start()
+		autoScalerController.Start()
+		defer autoScalerController.Stop()
 	} else {
 		log.Printf("Autoscaler disabled")
+	}
+
+	callGraphConfig, err := callgraph.NewConfigFromEnv("faasd")
+	if err != nil {
+		return err
+	}
+
+	callGraphController := handlers.NewFaasdCallGraphController(autoScalerController, client, store, callGraphConfig)
+	handlers.SetCallGraphController(callGraphController)
+
+	if callGraphConfig.Enabled {
+		log.Printf("Callgraph enabled")
+		callGraphController.Start()
+		defer callGraphController.Stop()
+	} else {
+		log.Printf("Callgraph disabled")
 	}
 
 	invokeResolver := handlers.NewInvokeResolver(client)
 
 	alwaysPull := true
 	bootstrapHandlers := types.FaaSHandlers{
-		FunctionProxy:   httpHeaderMiddleware(proxy.NewHandlerFuncWithLifecycle(*config, invokeResolver, false, handlers.NewInvokeLifecycle(controller))),
-		DeleteFunction:  httpHeaderMiddleware(handlers.MakeDeleteHandler(client, cni, controller)),
-		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, controller)),
+		FunctionProxy:   httpHeaderMiddleware(proxy.NewHandlerFuncWithLifecycle(*config, invokeResolver, false, handlers.NewInvokeLifecycle(autoScalerController, callGraphController))),
+		DeleteFunction:  httpHeaderMiddleware(handlers.MakeDeleteHandler(client, cni, autoScalerController, callGraphController)),
+		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController)),
 		FunctionLister:  httpHeaderMiddleware(handlers.MakeReadHandler(client)),
 		FunctionStatus:  httpHeaderMiddleware(handlers.MakeReplicaReaderHandler(client)),
-		ScaleFunction:   httpHeaderMiddleware(handlers.MakeReplicaUpdateHandler(client, cni, controller)),
-		UpdateFunction:  httpHeaderMiddleware(handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, controller)),
+		ScaleFunction:   httpHeaderMiddleware(handlers.MakeReplicaUpdateHandler(client, cni, autoScalerController, callGraphController)),
+		UpdateFunction:  httpHeaderMiddleware(handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController)),
 		Health:          httpHeaderMiddleware(func(w http.ResponseWriter, r *http.Request) {}),
 		Info:            httpHeaderMiddleware(handlers.MakeInfoHandler(faasd.Version, faasd.GitCommit)),
 		ListNamespaces:  httpHeaderMiddleware(handlers.MakeNamespacesLister(client)),
@@ -119,6 +137,24 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 		Logs:            httpHeaderMiddleware(logs.NewLogHandlerFunc(faasdlogs.New(), config.ReadTimeout)),
 		MutateNamespace: httpHeaderMiddleware(handlers.MakeMutateNamespace(client)),
 	}
+
+	callgraphHandler := httpHeaderMiddleware(handlers.MakeCallGraphHandler(callGraphController))
+	callgraphFunctionHandler := httpHeaderMiddleware(handlers.MakeCallGraphFunctionHandler(callGraphController))
+	callgraphEdgeHandler := httpHeaderMiddleware(handlers.MakeCallGraphEdgeHandler(callGraphController))
+	if config.EnableBasicAuth {
+		reader := auth.ReadBasicAuthFromDisk{SecretMountPath: config.SecretMountPath}
+		credentials, readErr := reader.Read()
+		if readErr != nil {
+			return readErr
+		}
+		callgraphHandler = auth.DecorateWithBasicAuth(callgraphHandler, credentials)
+		callgraphFunctionHandler = auth.DecorateWithBasicAuth(callgraphFunctionHandler, credentials)
+		callgraphEdgeHandler = auth.DecorateWithBasicAuth(callgraphEdgeHandler, credentials)
+	}
+
+	bootstrap.Router().HandleFunc("/system/callgraph", callgraphHandler).Methods(http.MethodGet)
+	bootstrap.Router().HandleFunc("/system/callgraph/function/{name:["+bootstrap.NameExpression+"]+}", callgraphFunctionHandler).Methods(http.MethodGet)
+	bootstrap.Router().HandleFunc("/system/callgraph/edge", callgraphEdgeHandler).Methods(http.MethodGet)
 
 	log.Printf("Listening on: 0.0.0.0:%d", *config.TCPPort)
 	bootstrap.Serve(cmd.Context(), &bootstrapHandlers, config)

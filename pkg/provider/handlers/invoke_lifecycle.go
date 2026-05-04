@@ -3,27 +3,35 @@ package handlers
 import "net/http"
 
 type InvokeLifecycle struct {
-	controller *FaasdAutoScaler
+	autoScalerController *FaasdAutoScalerController
+	callGraphController  *FaasdCallGraphController
 }
 
-func NewInvokeLifecycle(controller *FaasdAutoScaler) *InvokeLifecycle {
-	return &InvokeLifecycle{controller: controller}
+func NewInvokeLifecycle(autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController) *InvokeLifecycle {
+	return &InvokeLifecycle{autoScalerController, callGraphController}
 }
 
-func (i *InvokeLifecycle) StartInvocation(_ *http.Request, functionName string) error {
-	if i == nil || i.controller == nil || !i.controller.Enabled() {
-		return nil
+func (i *InvokeLifecycle) StartInvocation(r *http.Request, functionName string) error {
+	fnName, namespace := ParseFunctionNameNamespace(functionName)
+
+	if i != nil && i.callGraphController != nil && i.callGraphController.Enabled() {
+		i.callGraphController.StartInvocation(r, namespace, fnName)
 	}
 
-	fnName, namespace := ParseFunctionNameNamespace(functionName)
-	return i.controller.StartInvocation(namespace, fnName)
+	if i != nil && i.autoScalerController != nil && i.autoScalerController.Enabled() {
+		return i.autoScalerController.StartInvocation(namespace, fnName)
+	}
+	return nil
 }
 
-func (i *InvokeLifecycle) EndInvocation(_ *http.Request, functionName string) {
-	if i == nil || i.controller == nil || !i.controller.Enabled() {
-		return
+func (i *InvokeLifecycle) EndInvocation(r *http.Request, functionName string) {
+	fnName, namespace := ParseFunctionNameNamespace(functionName)
+
+	if i != nil && i.callGraphController != nil && i.callGraphController.Enabled() {
+		i.callGraphController.EndInvocation(r, namespace, fnName)
 	}
 
-	fnName, namespace := ParseFunctionNameNamespace(functionName)
-	i.controller.EndInvocation(namespace, fnName)
+	if i != nil && i.autoScalerController != nil && i.autoScalerController.Enabled() {
+		i.autoScalerController.EndInvocation(namespace, fnName)
+	}
 }

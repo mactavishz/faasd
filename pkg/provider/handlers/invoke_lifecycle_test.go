@@ -9,10 +9,10 @@ import (
 
 func TestInvokeLifecycleBeginInvocationTracksState(t *testing.T) {
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
-	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
+	controller := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 	controller.RegisterFunctionWithState("openfaas-fn", "echo", map[string]string{"com.openfaas.scale.zero": "true"}, autoscaler.StateActive)
 
-	lifecycle := NewInvokeLifecycle(controller)
+	lifecycle := NewInvokeLifecycle(controller, nil)
 	err := lifecycle.StartInvocation(nil, "echo.openfaas-fn")
 	if err != nil {
 		t.Fatalf("expected begin invocation to succeed, got %v", err)
@@ -39,9 +39,9 @@ func TestInvokeLifecycleBeginInvocationTracksState(t *testing.T) {
 
 func TestInvokeLifecycleBeginInvocationDisabledNoop(t *testing.T) {
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: false, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
-	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
+	controller := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 
-	lifecycle := NewInvokeLifecycle(controller)
+	lifecycle := NewInvokeLifecycle(controller, nil)
 	err := lifecycle.StartInvocation(nil, "echo")
 	if err != nil {
 		t.Fatalf("expected no error for disabled autoscaler, got %v", err)

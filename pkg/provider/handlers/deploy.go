@@ -39,7 +39,7 @@ const (
 // MakeDeployHandler handles POST /system/functions on the faasd provider.
 // The gateway forwards deploy requests here, and this handler validates input,
 // creates function runtime resources, then stores metadata for status/scaling.
-func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, controller *FaasdAutoScaler) func(w http.ResponseWriter, r *http.Request) {
+func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		if r.Body == nil {
@@ -83,6 +83,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		}
 
 		name := req.Service
+		start := time.Now()
 		ctx := namespaces.WithNamespace(context.Background(), namespace)
 
 		if err := preDeploy(client, 1); err != nil {
@@ -98,8 +99,12 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		}
 
 		stored := PutFunctionFromDeployment(req, namespace)
-		if controller != nil {
-			controller.RegisterFunctionWithState(namespace, name, ensureFunctionLabelsForAutoscaler(stored.Labels), autoscaler.StateActive)
+		RegisterCallGraphFunction(client, namespace, name, stored.Labels)
+		if callGraphController != nil {
+			callGraphController.recordScaleUp(name, time.Since(start), true)
+		}
+		if autoScalerController != nil {
+			autoScalerController.RegisterFunctionWithState(namespace, name, ensureFunctionLabelsForAutoscaler(stored.Labels), autoscaler.StateActive)
 		}
 	}
 }

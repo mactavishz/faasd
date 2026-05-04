@@ -14,6 +14,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/mactavishz/FaaS-Platform-Knowledge-Optimization v0.0.0
 	github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/autoscaler v0.0.0
+	github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/callgraph v0.0.0
 	github.com/morikuni/aec v1.0.0
 	github.com/opencontainers/runtime-spec v1.1.0
 	github.com/openfaas/faas-provider v0.25.8
@@ -120,3 +121,5 @@ replace github.com/openfaas/faas-provider => ../faas-provider
 replace github.com/mactavishz/FaaS-Platform-Knowledge-Optimization => ..
 
 replace github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/autoscaler => ../autoscaler
+
+replace github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/callgraph => ../callgraph

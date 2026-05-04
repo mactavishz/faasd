@@ -60,7 +60,7 @@ func TestSetAutoScalerController_SetAndClear(t *testing.T) {
 	}
 
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
-	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
+	controller := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 	SetAutoScalerController(controller)
 
 	if got := getAutoScalerController(); got != controller {
@@ -74,31 +74,31 @@ func TestSetAutoScalerController_SetAndClear(t *testing.T) {
 }
 
 func TestNewFaasdAutoScaler_EnabledReflectsConfig(t *testing.T) {
-	disabled := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, autoscaler.Config{Platform: "faasd", Enabled: false, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour})
+	disabled := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, autoscaler.Config{Platform: "faasd", Enabled: false, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour})
 	if disabled.Enabled() {
 		t.Fatal("expected disabled autoscaler")
 	}
 
-	enabled := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour})
+	enabled := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour})
 	if !enabled.Enabled() {
 		t.Fatal("expected enabled autoscaler")
 	}
 }
 
 func TestFaasdAutoScaler_StartStopNilSafe(t *testing.T) {
-	var nilController *FaasdAutoScaler
+	var nilController *FaasdAutoScalerController
 	nilController.Start()
 	nilController.Stop()
 
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: false, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
-	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
+	controller := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 	controller.Start()
 	controller.Stop()
 }
 
 func TestFaasdAutoScaler_DisabledMethodsAreNoop(t *testing.T) {
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: false, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
-	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
+	controller := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 
 	controller.RegisterFunctionWithState("openfaas-fn", "fn", map[string]string{"k": "v"}, autoscaler.StateScaledDown)
 	controller.RecordActivity("openfaas-fn", "fn")
@@ -111,7 +111,7 @@ func TestFaasdAutoScaler_DisabledMethodsAreNoop(t *testing.T) {
 
 func TestFaasdAutoScaler_EnabledMethodsDelegateToAutoscaler(t *testing.T) {
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
-	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
+	controller := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 
 	controller.RegisterFunctionWithState("openfaas-fn", "fn", map[string]string{"com.openfaas.scale.zero": "true"}, autoscaler.StateScaledDown)
 	key := controller.scaleKey("openfaas-fn", "fn")
@@ -145,7 +145,7 @@ func TestFaasdAutoScaler_EnabledMethodsDelegateToAutoscaler(t *testing.T) {
 }
 
 func TestScaleKeyAndParseScaleKey(t *testing.T) {
-	controller := &FaasdAutoScaler{}
+	controller := &FaasdAutoScalerController{}
 
 	if got := controller.scaleKey("ns", "fn"); got != "ns/fn" {
 		t.Fatalf("unexpected scale key: %q", got)
@@ -185,7 +185,7 @@ func TestEnsureFunctionLabelsForAutoscaler_NilInputReturnsEmptyMap(t *testing.T)
 
 func TestStartEndInvocationTransitionsToBlockedAndBack(t *testing.T) {
 	cfg := autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}
-	controller := NewFaasdAutoScaler(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
+	controller := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, cfg)
 	controller.RegisterFunctionWithState("openfaas-fn", "fn", map[string]string{"com.openfaas.scale.zero": "true"}, autoscaler.StateActive)
 
 	err := controller.StartInvocation("openfaas-fn", "fn")

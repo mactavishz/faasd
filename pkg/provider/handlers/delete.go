@@ -21,7 +21,7 @@ import (
 // MakeDeleteHandler handles DELETE /system/functions on the faasd provider.
 // The gateway forwards delete requests here, and this handler removes runtime
 // resources, then clears stored metadata and autoscaler registration.
-func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, controller *FaasdAutoScaler) func(w http.ResponseWriter, r *http.Request) {
+func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -87,8 +87,11 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, controller *Faa
 		}
 
 		DeleteStoredFunction(namespace, name)
-		if controller != nil {
-			controller.UnregisterFunction(namespace, name)
+		if callGraphController != nil {
+			callGraphController.deleteFunction(namespace, name)
+		}
+		if autoScalerController != nil {
+			autoScalerController.UnregisterFunction(namespace, name)
 		}
 
 		log.Printf("[Delete] Removed: %s.%s\n", name, namespace)

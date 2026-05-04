@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
@@ -22,7 +23,7 @@ import (
 // MakeUpdateHandler handles PUT /system/functions on the faasd provider.
 // The gateway forwards update requests here, and this handler redeploys the
 // function runtime and refreshes stored metadata/autoscaler state.
-func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, controller *FaasdAutoScaler) func(w http.ResponseWriter, r *http.Request) {
+func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -46,6 +47,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		name := req.Service
 		namespace := getRequestNamespace(req.Namespace)
+		start := time.Now()
 
 		// Check if namespace exists, and it has the openfaas label
 		valid, err := validNamespace(client.NamespaceService(), namespace)
@@ -95,14 +97,18 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			previousStored = NewStoredFunctionFromRuntime(function)
 		}
 
-		if controller != nil && controller.Enabled() {
+		if callGraphController != nil {
+			callGraphController.resetFunction(name)
+		}
+
+		if autoScalerController != nil && autoScalerController.Enabled() {
 			store := getFunctionStore()
 			store.Put(newStored)
 
-			if err := controller.ScaleDownWhenIdle(namespace, name); err != nil {
+			if err := autoScalerController.ScaleDownWhenIdle(namespace, name); err != nil {
 				if strings.Contains(err.Error(), "not registered") {
-					controller.RegisterFunctionWithState(namespace, name, ensureFunctionLabelsForAutoscaler(newStored.Labels), autoscaler.StateActive)
-					err = controller.ScaleDownWhenIdle(namespace, name)
+					autoScalerController.RegisterFunctionWithState(namespace, name, ensureFunctionLabelsForAutoscaler(newStored.Labels), autoscaler.StateActive)
+					err = autoScalerController.ScaleDownWhenIdle(namespace, name)
 				}
 				if err != nil {
 					store.Put(previousStored)
@@ -113,13 +119,14 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 				}
 			}
 
-			if err := controller.ScaleUp(namespace, name); err != nil {
+			if err := autoScalerController.ScaleUp(namespace, name); err != nil {
 				store.Put(previousStored)
 				log.Printf("[Update] error scaling up %s after update, error: %s\n", name, err)
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 
+			RegisterCallGraphFunction(client, namespace, name, newStored.Labels)
 			return
 		}
 
@@ -146,5 +153,9 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		}
 
 		PutFunctionFromDeployment(req, namespace)
+		RegisterCallGraphFunction(client, namespace, name, newStored.Labels)
+		if callGraphController != nil {
+			callGraphController.recordScaleUp(name, time.Since(start), true)
+		}
 	}
 }
