@@ -115,6 +115,11 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 		log.Printf("Callgraph enabled")
 		callGraphController.Start()
 		defer callGraphController.Stop()
+		if callGraphConfig.Prewarm.Enabled {
+			log.Printf("Callgraph prewarm enabled")
+		} else {
+			log.Printf("Callgraph prewarm disabled")
+		}
 	} else {
 		log.Printf("Callgraph disabled")
 	}
