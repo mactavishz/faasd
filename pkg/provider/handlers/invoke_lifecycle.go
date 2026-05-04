@@ -14,12 +14,14 @@ func NewInvokeLifecycle(autoScalerController *FaasdAutoScalerController, callGra
 func (i *InvokeLifecycle) StartInvocation(r *http.Request, functionName string) error {
 	fnName, namespace := ParseFunctionNameNamespace(functionName)
 
-	if i != nil && i.callGraphController != nil && i.callGraphController.Enabled() {
-		i.callGraphController.StartInvocation(r, namespace, fnName)
+	if i != nil && i.autoScalerController != nil && i.autoScalerController.Enabled() {
+		if err := i.autoScalerController.StartInvocation(namespace, fnName); err != nil {
+			return err
+		}
 	}
 
-	if i != nil && i.autoScalerController != nil && i.autoScalerController.Enabled() {
-		return i.autoScalerController.StartInvocation(namespace, fnName)
+	if i != nil && i.callGraphController != nil && i.callGraphController.Enabled() {
+		i.callGraphController.StartInvocation(r, namespace, fnName)
 	}
 	return nil
 }

@@ -202,6 +202,16 @@ func (c *FaasdCallGraphController) extractCaller(r *http.Request) (string, bool,
 		return "", false, false
 	}
 
+	callID := strings.TrimSpace(r.Header.Get("X-Call-Id"))
+	callerExecID := strings.TrimSpace(r.Header.Get("X-Exec-Id"))
+	if callID != "" && callerExecID != "" {
+		// If both X-Call-Id and X-Exec-Id are absent,
+		// It is likely that the request is queued for the async invocation and the caller information is not propagated via headers.
+		if caller, ok := c.callGraphTracker.GetExecutionContextFunction(callID, callerExecID); ok {
+			return c.lookupRouteByFunctionName(caller)
+		}
+	}
+
 	raw := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
 	if raw == "" {
 		return "", false, false
@@ -212,27 +222,78 @@ func (c *FaasdCallGraphController) extractCaller(r *http.Request) (string, bool,
 		return "", false, false
 	}
 
-	ip := strings.TrimSpace(parts[0])
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		ip = host
-	}
-	if strings.HasPrefix(ip, "[") && strings.HasSuffix(ip, "]") {
-		ip = strings.TrimPrefix(strings.TrimSuffix(ip, "]"), "[")
+	normalizedIPs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		ip := normalizeForwardedIP(part)
+		if ip == "" {
+			continue
+		}
+		normalizedIPs = append(normalizedIPs, ip)
 	}
 
-	c.mu.RLock()
-	key, ok := c.reverseRoutingTable[ip]
-	if !ok {
-		c.mu.RUnlock()
+	if len(normalizedIPs) == 0 {
 		return "", false, false
 	}
+
+	for idx := len(normalizedIPs) - 1; idx >= 0; idx-- {
+		if caller, found, enabled := c.lookupRouteByIP(normalizedIPs[idx]); found {
+			return caller, found, enabled
+		}
+	}
+
+	return "", false, false
+}
+
+func (c *FaasdCallGraphController) lookupRouteByIP(ip string) (string, bool, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	key, ok := c.reverseRoutingTable[ip]
+	if !ok {
+		return "", false, false
+	}
+
 	route := c.routingTable[key]
-	c.mu.RUnlock()
 	if route == nil {
 		return "", false, false
 	}
 
 	return route.name, true, route.callgraphEnabled
+}
+
+func (c *FaasdCallGraphController) lookupRouteByFunctionName(name string) (string, bool, bool) {
+	if strings.TrimSpace(name) == "" {
+		return "", false, false
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, route := range c.routingTable {
+		if route == nil || route.name != name {
+			continue
+		}
+		return route.name, true, route.callgraphEnabled
+	}
+
+	return name, true, true
+}
+
+func normalizeForwardedIP(value string) string {
+	ip := strings.TrimSpace(value)
+	if ip == "" {
+		return ""
+	}
+
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+
+	if strings.HasPrefix(ip, "[") && strings.HasSuffix(ip, "]") {
+		ip = strings.TrimPrefix(strings.TrimSuffix(ip, "]"), "[")
+	}
+
+	return strings.TrimSpace(ip)
 }
 
 // isCallgraphEnabled checks if callgraph tracking is enabled for the given function.
