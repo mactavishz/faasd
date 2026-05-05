@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/morikuni/aec"
 	"github.com/openfaas/faasd/pkg"
@@ -73,7 +74,7 @@ func parseBaseCommand(_ *cobra.Command, _ []string) {
 }
 
 func printVersion() {
-	fmt.Printf("faasd Community Edition (CE) version: %s\tcommit: %s\n", pkg.GetVersion(), pkg.GitCommit)
+	log.Printf("faasd Community Edition (CE) version: %s\tcommit: %s\n", pkg.GetVersion(), pkg.GitCommit)
 }
 
 func printLogo() {

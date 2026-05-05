@@ -67,8 +67,10 @@ func getAutoScalerController() *FaasdAutoScalerController {
 	return activeAutoScaler
 }
 
-func NewFaasdAutoScalerController(client *containerd.Client, cni gocni.CNI, store FunctionStore, baseSecretPath string, alwaysPull bool, cfg autoscaler.Config) *FaasdAutoScalerController {
-	logger := zap.NewNop()
+func NewFaasdAutoScalerController(client *containerd.Client, cni gocni.CNI, store FunctionStore, baseSecretPath string, alwaysPull bool, cfg autoscaler.Config, logger *zap.Logger) *FaasdAutoScalerController {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	controller := &FaasdAutoScalerController{
 		client:         client,
 		cni:            cni,

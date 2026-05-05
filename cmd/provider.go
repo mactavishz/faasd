@@ -22,6 +22,7 @@ import (
 	"github.com/openfaas/faasd/pkg/provider/config"
 	"github.com/openfaas/faasd/pkg/provider/handlers"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 const secretDirPermission = 0755
@@ -39,6 +40,11 @@ func makeProviderCmd() *cobra.Command {
 }
 
 func runProviderE(cmd *cobra.Command, _ []string) error {
+
+	logger := faasdlogs.CreateLogger()
+	defer logger.Sync()
+	undo := zap.RedirectStdLog(logger)
+	defer undo()
 
 	config, providerConfig, err := config.ReadFromEnv(types.OsEnv{})
 	if err != nil {
@@ -92,7 +98,7 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 		return err
 	}
 
-	autoScalerController := handlers.NewFaasdAutoScalerController(client, cni, store, baseUserSecretsPath, true, autoScalerConfig)
+	autoScalerController := handlers.NewFaasdAutoScalerController(client, cni, store, baseUserSecretsPath, true, autoScalerConfig, logger)
 	handlers.SetAutoScalerController(autoScalerController)
 
 	if autoScalerConfig.Enabled {
@@ -108,7 +114,7 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 		return err
 	}
 
-	callGraphController := handlers.NewFaasdCallGraphController(autoScalerController, client, store, callGraphConfig)
+	callGraphController := handlers.NewFaasdCallGraphController(autoScalerController, client, store, callGraphConfig, logger)
 	handlers.SetCallGraphController(callGraphController)
 
 	if callGraphConfig.Enabled {

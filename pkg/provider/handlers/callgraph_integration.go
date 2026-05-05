@@ -48,8 +48,10 @@ var (
 	activeCallGraph *FaasdCallGraphController
 )
 
-func NewFaasdCallGraphController(autoscaler *FaasdAutoScalerController, client *containerd.Client, store FunctionStore, callGraphConfig callgraph.Config) *FaasdCallGraphController {
-	logger := zap.NewNop()
+func NewFaasdCallGraphController(autoscaler *FaasdAutoScalerController, client *containerd.Client, store FunctionStore, callGraphConfig callgraph.Config, logger *zap.Logger) *FaasdCallGraphController {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 
 	controller := &FaasdCallGraphController{
 		autoscaler:          autoscaler,
