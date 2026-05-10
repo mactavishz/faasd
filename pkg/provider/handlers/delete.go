@@ -87,6 +87,7 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerContr
 		}
 
 		DeleteStoredFunction(namespace, name)
+		ResetFunctionStats(namespace, name)
 		if callGraphController != nil {
 			callGraphController.deleteFunction(namespace, name)
 		}

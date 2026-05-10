@@ -133,8 +133,10 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 	invokeResolver := handlers.NewInvokeResolver(client)
 
 	alwaysPull := true
+	functionProxy := proxy.NewHandlerFuncWithLifecycle(*config, invokeResolver, false, handlers.NewInvokeLifecycle(autoScalerController, callGraphController))
+	functionProxy = handlers.MakeFunctionStatsMiddleware(functionProxy)
 	bootstrapHandlers := types.FaaSHandlers{
-		FunctionProxy:   httpHeaderMiddleware(proxy.NewHandlerFuncWithLifecycle(*config, invokeResolver, false, handlers.NewInvokeLifecycle(autoScalerController, callGraphController))),
+		FunctionProxy:   httpHeaderMiddleware(functionProxy),
 		DeleteFunction:  httpHeaderMiddleware(handlers.MakeDeleteHandler(client, cni, autoScalerController, callGraphController)),
 		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController)),
 		FunctionLister:  httpHeaderMiddleware(handlers.MakeReadHandler(client)),
@@ -152,6 +154,7 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 	callgraphHandler := httpHeaderMiddleware(handlers.MakeCallGraphHandler(callGraphController))
 	callgraphFunctionHandler := httpHeaderMiddleware(handlers.MakeCallGraphFunctionHandler(callGraphController))
 	callgraphEdgeHandler := httpHeaderMiddleware(handlers.MakeCallGraphEdgeHandler(callGraphController))
+	statsFunctionHandler := httpHeaderMiddleware(handlers.MakeFunctionStatsHandler(client))
 	if config.EnableBasicAuth {
 		reader := auth.ReadBasicAuthFromDisk{SecretMountPath: config.SecretMountPath}
 		credentials, readErr := reader.Read()
@@ -161,11 +164,13 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 		callgraphHandler = auth.DecorateWithBasicAuth(callgraphHandler, credentials)
 		callgraphFunctionHandler = auth.DecorateWithBasicAuth(callgraphFunctionHandler, credentials)
 		callgraphEdgeHandler = auth.DecorateWithBasicAuth(callgraphEdgeHandler, credentials)
+		statsFunctionHandler = auth.DecorateWithBasicAuth(statsFunctionHandler, credentials)
 	}
 
 	bootstrap.Router().HandleFunc("/system/callgraph", callgraphHandler).Methods(http.MethodGet)
 	bootstrap.Router().HandleFunc("/system/callgraph/function/{name:["+bootstrap.NameExpression+"]+}", callgraphFunctionHandler).Methods(http.MethodGet)
 	bootstrap.Router().HandleFunc("/system/callgraph/edge", callgraphEdgeHandler).Methods(http.MethodGet)
+	bootstrap.Router().HandleFunc("/system/stats/function/{name:["+bootstrap.NameExpression+"]+}", statsFunctionHandler).Methods(http.MethodGet)
 
 	log.Printf("Listening on: 0.0.0.0:%d", *config.TCPPort)
 	bootstrap.Serve(cmd.Context(), &bootstrapHandlers, config)

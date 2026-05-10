@@ -10,7 +10,7 @@ import (
 
 func TestExtractCaller_RightmostFromHeader(t *testing.T) {
 	cfg := *callgraph.DefaultConfig()
-	controller := NewFaasdCallGraphController(nil, nil, NewInMemoryFunctionStore(), cfg)
+	controller := NewFaasdCallGraphController(nil, nil, NewInMemoryFunctionStore(), cfg, nil)
 
 	controller.upsertFunction("openfaas-fn", "tree-a", nil, "10.62.0.40", true)
 	controller.upsertFunction("openfaas-fn", "tree-b", nil, "10.62.0.41", true)
@@ -35,7 +35,7 @@ func TestExtractCaller_RightmostFromHeader(t *testing.T) {
 
 func TestExtractCaller_NotFound(t *testing.T) {
 	cfg := *callgraph.DefaultConfig()
-	controller := NewFaasdCallGraphController(nil, nil, NewInMemoryFunctionStore(), cfg)
+	controller := NewFaasdCallGraphController(nil, nil, NewInMemoryFunctionStore(), cfg, nil)
 
 	controller.upsertFunction("openfaas-fn", "tree-a", nil, "10.62.0.40", true)
 
@@ -56,7 +56,7 @@ func TestExtractCaller_NotFound(t *testing.T) {
 
 func TestExtractCaller_ExecutionContextFallback(t *testing.T) {
 	cfg := *callgraph.DefaultConfig()
-	controller := NewFaasdCallGraphController(nil, nil, NewInMemoryFunctionStore(), cfg)
+	controller := NewFaasdCallGraphController(nil, nil, NewInMemoryFunctionStore(), cfg, nil)
 
 	controller.upsertFunction("openfaas-fn", "tree-c", nil, "10.62.0.41", true)
 	controller.callGraphTracker.StartExecution("tree-c", "req-async", "exec-c", time.Now())
