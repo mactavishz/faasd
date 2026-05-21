@@ -6,7 +6,7 @@ functions:
   echo-js:
     lang: node24
     handler: ./handler
-    image: ${REGISTRY_PREFIX:-registry.local:5050/faasd/}echo-js:latest
+    image: registry.local:5050/faasd/echo-js:latest
     limits:
       cpu: 0.25
       memory: 256Mi

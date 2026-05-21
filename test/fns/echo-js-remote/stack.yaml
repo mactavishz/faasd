@@ -5,7 +5,12 @@ provider:
 functions:
   echo-js-remote:
     lang: node24
-    image: macsalvation/faasd-echo-js:latest
+    handler: ../echo-js/handler
+    image: ghcr.io/mactavishz/faasd-echo-js:latest
     limits:
       cpu: 0.25
       memory: 256Mi
+configuration:
+  templates:
+    - name: node24
+      source: https://github.com/mactavishz/faas-templates
