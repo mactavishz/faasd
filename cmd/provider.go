@@ -119,6 +119,14 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 
 	if callGraphConfig.Enabled {
 		log.Printf("Callgraph enabled")
+		switch callGraphConfig.Method {
+		case callgraph.SimpleMovingAverage:
+			log.Printf("Callgraph method: Simple Moving Average")
+		case callgraph.ExponentialMovingAverage:
+			log.Printf("Callgraph method: Exponential Moving Average")
+		default:
+			log.Printf("Callgraph method: Unknown, defaulting to Simple Moving Average")
+		}
 		callGraphController.Start()
 		defer callGraphController.Stop()
 		if callGraphConfig.Prewarm.Enabled {
