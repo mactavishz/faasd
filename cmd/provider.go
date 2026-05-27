@@ -140,7 +140,7 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 
 	invokeResolver := handlers.NewInvokeResolver(client)
 
-	alwaysPull := true
+	alwaysPull := false
 	functionProxy := proxy.NewHandlerFuncWithLifecycle(*config, invokeResolver, false, handlers.NewInvokeLifecycle(autoScalerController, callGraphController))
 	functionProxy = handlers.MakeFunctionStatsMiddleware(functionProxy)
 	bootstrapHandlers := types.FaaSHandlers{
