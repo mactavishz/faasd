@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"time"
@@ -27,7 +27,7 @@ func waitForFunctionReady(startInfo functionStartInfo, functionName, namespace s
 		err := probeFunctionReady(startInfo.addr)
 
 		if err == nil {
-			log.Printf("[Ready] function %s.%s ready in %s", functionName, namespace, time.Since(start))
+			slog.Info(fmt.Sprintf("[Ready] function %s.%s ready in %s", functionName, namespace, time.Since(start)))
 			return nil
 		}
 

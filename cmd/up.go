@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path"
@@ -69,7 +69,7 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	log.Printf("Supervisor created in: %s\n", units.HumanDuration(time.Since(start)))
+	slog.Info(fmt.Sprintf("Supervisor created in: %s\n", units.HumanDuration(time.Since(start))))
 
 	start = time.Now()
 	if err := supervisor.Start(services); err != nil {
@@ -77,7 +77,7 @@ func runUp(cmd *cobra.Command, _ []string) error {
 	}
 	defer supervisor.Close()
 
-	log.Printf("Supervisor init done in: %s\n", units.HumanDuration(time.Since(start)))
+	slog.Info(fmt.Sprintf("Supervisor init done in: %s\n", units.HumanDuration(time.Since(start))))
 
 	shutdownTimeout := time.Second * 1
 	timeout := time.Second * 60
@@ -88,10 +88,10 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 
-		log.Printf("faasd: waiting for SIGTERM or SIGINT\n")
+		slog.Info("faasd: waiting for SIGTERM or SIGINT\n")
 		<-sig
 
-		log.Printf("Signal received.. shutting down server in %s\n", shutdownTimeout.String())
+		slog.Info(fmt.Sprintf("Signal received.. shutting down server in %s\n", shutdownTimeout.String()))
 		err := supervisor.Remove(services)
 		if err != nil {
 			fmt.Println(err)
@@ -162,10 +162,10 @@ func makeBasicAuthFiles(wd string) error {
 func makeFile(filePath, fileContents string) error {
 	_, err := os.Stat(filePath)
 	if err == nil {
-		log.Printf("File exists: %q\n", filePath)
+		slog.Info(fmt.Sprintf("File exists: %q\n", filePath))
 		return nil
 	} else if os.IsNotExist(err) {
-		log.Printf("Writing to: %q\n", filePath)
+		slog.Info(fmt.Sprintf("Writing to: %q\n", filePath))
 		return os.WriteFile(filePath, []byte(fileContents), workingDirectoryPermission)
 	} else {
 		return err
@@ -207,7 +207,7 @@ func parseUpFlags(cmd *cobra.Command) (upConfig, error) {
 
 func preRunE(cmd *cobra.Command, _ []string) error {
 	if err := pkg.ConnectivityCheck(); err != nil {
-		log.Println("no public Internet access")
+		slog.Info(fmt.Sprint("no public Internet access"))
 	}
 	return nil
 }

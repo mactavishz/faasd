@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -49,9 +49,9 @@ func Remove(ctx context.Context, client *containerd.Client, name string) error {
 		if taskFound {
 			status, err := t.Status(ctx)
 			if err != nil {
-				log.Printf("Unable to get status for: %s, error: %s", name, err.Error())
+				slog.Info(fmt.Sprintf("Unable to get status for: %s, error: %s", name, err.Error()))
 			} else {
-				log.Printf("Status of %s is: %s\n", name, status.Status)
+				slog.Info(fmt.Sprintf("Status of %s is: %s\n", name, status.Status))
 			}
 
 			var gracePeriod = time.Second * 30
@@ -101,12 +101,12 @@ func killTask(ctx context.Context, task containerd.Task, gracePeriod time.Durati
 		if task != nil {
 			wait, err := task.Wait(ctx)
 			if err != nil {
-				log.Printf("error waiting on task: %s", err)
+				slog.Info(fmt.Sprintf("error waiting on task: %s", err))
 				return
 			}
 
 			if err := task.Kill(ctx, unix.SIGTERM, containerd.WithKillAll); err != nil {
-				log.Printf("error killing container task: %s", err)
+				slog.Info(fmt.Sprintf("error killing container task: %s", err))
 			}
 
 			select {
@@ -114,9 +114,9 @@ func killTask(ctx context.Context, task containerd.Task, gracePeriod time.Durati
 				waited = true
 				return
 			case <-time.After(gracePeriod):
-				log.Printf("Sending SIGKILL to: %s after: %s", task.ID(), gracePeriod.Round(time.Second).String())
+				slog.Info(fmt.Sprintf("Sending SIGKILL to: %s after: %s", task.ID(), gracePeriod.Round(time.Second).String()))
 				if err := task.Kill(ctx, unix.SIGKILL, containerd.WithKillAll); err != nil {
-					log.Printf("error sending SIGKILL to task: %s", err)
+					slog.Info(fmt.Sprintf("error sending SIGKILL to task: %s", err))
 				}
 
 				return
@@ -129,7 +129,7 @@ func killTask(ctx context.Context, task containerd.Task, gracePeriod time.Durati
 		if !waited {
 			wait, err := task.Wait(ctx)
 			if err != nil {
-				log.Printf("error waiting on task after kill: %s", err)
+				slog.Info(fmt.Sprintf("error waiting on task after kill: %s", err))
 			}
 
 			<-wait

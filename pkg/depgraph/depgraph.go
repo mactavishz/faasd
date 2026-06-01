@@ -1,6 +1,6 @@
 package depgraph
 
-import "log"
+import "fmt"
 
 // Node represents a node in a Graph with
 // 0 to many edges
@@ -89,7 +89,7 @@ func resolve(node *Node, resolved, unresolved *Graph) {
 	for _, edge := range node.Edges {
 
 		if !resolved.Contains(edge) && unresolved.Contains(edge) {
-			log.Panicf("edge: %s may be a circular dependency", edge.Name)
+			panic(fmt.Sprintf("edge: %s may be a circular dependency", edge.Name))
 		}
 
 		resolve(edge, resolved, unresolved)

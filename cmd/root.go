@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/morikuni/aec"
 	"github.com/openfaas/faasd/pkg"
+	faasdlogs "github.com/openfaas/faasd/pkg/logs"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +28,7 @@ func RootCommand() *cobra.Command {
 
 // Execute faasd
 func Execute() error {
+	slog.SetDefault(faasdlogs.CreateLogger())
 
 	if err := rootCommand.Execute(); err != nil {
 		return err
@@ -74,7 +76,7 @@ func parseBaseCommand(_ *cobra.Command, _ []string) {
 }
 
 func printVersion() {
-	log.Printf("faasd Community Edition (CE) version: %s\tcommit: %s\n", pkg.GetVersion(), pkg.GitCommit)
+	slog.Info(fmt.Sprintf("faasd Community Edition (CE) version: %s\tcommit: %s\n", pkg.GetVersion(), pkg.GitCommit))
 }
 
 func printLogo() {

@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -101,12 +102,12 @@ func buildCmd(ctx context.Context, req logs.Request) *exec.Cmd {
 // the loop is based on the Decoder example in the docs
 // https://golang.org/pkg/encoding/json/#Decoder.Decode
 func streamLogs(ctx context.Context, cmd *exec.Cmd, out io.ReadCloser, msgs chan logs.Message) {
-	log.Println("starting journal stream using ", cmd.String())
+	slog.Info(fmt.Sprint("starting journal stream using ", cmd.String()))
 
 	// will ensure `out` is closed and all related resources cleaned up
 	go func() {
 		if err := cmd.Wait(); err != nil {
-			log.Printf("journalctl exited with error: %s", err)
+			slog.Info(fmt.Sprintf("journalctl exited with error: %s", err))
 		}
 	}()
 
@@ -117,7 +118,7 @@ func streamLogs(ctx context.Context, cmd *exec.Cmd, out io.ReadCloser, msgs chan
 	dec := json.NewDecoder(out)
 	for dec.More() {
 		if ctx.Err() != nil {
-			log.Println("log stream context cancelled")
+			slog.Info(fmt.Sprint("log stream context cancelled"))
 			return
 		}
 
@@ -126,13 +127,13 @@ func streamLogs(ctx context.Context, cmd *exec.Cmd, out io.ReadCloser, msgs chan
 		entry := map[string]string{}
 		err := dec.Decode(&entry)
 		if err != nil {
-			log.Printf("error decoding journalctl output: %s", err)
+			slog.Info(fmt.Sprintf("error decoding journalctl output: %s", err))
 			return
 		}
 
 		msg, err := parseEntry(entry)
 		if err != nil {
-			log.Printf("error parsing journalctl output: %s", err)
+			slog.Info(fmt.Sprintf("error parsing journalctl output: %s", err))
 			return
 		}
 
@@ -178,5 +179,5 @@ func parseEntry(entry map[string]string) (logs.Message, error) {
 func logErrOut(out io.ReadCloser) {
 	defer out.Close()
 
-	io.Copy(log.Writer(), out)
+	io.Copy(os.Stderr, out)
 }

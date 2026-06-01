@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -170,7 +170,7 @@ func getNamespace(client *containerd.Client, w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(res); err != nil {
-		log.Printf("Get Namespace error: %s", err)
+		slog.Info(fmt.Sprintf("Get Namespace error: %s", err))
 	}
 }
 

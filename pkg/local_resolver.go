@@ -1,7 +1,8 @@
 package pkg
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -42,7 +43,7 @@ func (l *LocalResolver) Start() {
 		}
 
 		if rebuild {
-			log.Printf("Resolver rebuilding map")
+			slog.Info("Resolver rebuilding map")
 			l.rebuild()
 		}
 		time.Sleep(time.Second * 3)
@@ -55,7 +56,7 @@ func (l *LocalResolver) rebuild() {
 
 	fileData, fileErr := os.ReadFile(l.Path)
 	if fileErr != nil {
-		log.Printf("resolver rebuild error: %s", fileErr.Error())
+		slog.Info(fmt.Sprintf("resolver rebuild error: %s", fileErr.Error()))
 		return
 	}
 
@@ -67,7 +68,7 @@ func (l *LocalResolver) rebuild() {
 		if len(line) > 0 && index > -1 {
 			ip := line[:index]
 			host := line[index+1:]
-			log.Printf("Resolver: %q=%q", host, ip)
+			slog.Info(fmt.Sprintf("Resolver: %q=%q", host, ip))
 			l.Map[host] = ip
 		}
 	}
@@ -83,7 +84,7 @@ func (l *LocalResolver) Get(upstream string, got chan<- string, timeout time.Dur
 		}
 
 		if time.Now().After(start.Add(timeout)) {
-			log.Printf("Timed out after %s getting host %q", timeout.String(), upstream)
+			slog.Info(fmt.Sprintf("Timed out after %s getting host %q", timeout.String(), upstream))
 			break
 		}
 

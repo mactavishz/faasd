@@ -3,7 +3,8 @@ package handlers
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -54,7 +55,7 @@ func ListFunctions(client *containerd.Client, namespace string) (map[string]*Fun
 		f, err := GetFunction(client, name, namespace)
 		if err != nil {
 			if !strings.Contains(err.Error(), "unable to get IP address for container") {
-				log.Printf("List functions, skipping: %s, error: %s", name, err)
+				slog.Info(fmt.Sprintf("List functions, skipping: %s, error: %s", name, err))
 			}
 
 		} else {

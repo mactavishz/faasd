@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -11,7 +13,6 @@ import (
 	"github.com/containerd/containerd"
 	"github.com/google/uuid"
 	"github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/callgraph"
-	"go.uber.org/zap"
 )
 
 const prewarmSafetyMargin = 50 * time.Millisecond
@@ -35,7 +36,7 @@ type FaasdCallGraphController struct {
 	autoscaler       *FaasdAutoScalerController
 	client           *containerd.Client
 	store            FunctionStore
-	logger           *zap.Logger
+	logger           *slog.Logger
 
 	mu                  sync.RWMutex
 	routingTable        map[string]*callgraphRoute
@@ -48,9 +49,9 @@ var (
 	activeCallGraph *FaasdCallGraphController
 )
 
-func NewFaasdCallGraphController(autoscaler *FaasdAutoScalerController, client *containerd.Client, store FunctionStore, callGraphConfig callgraph.Config, logger *zap.Logger) *FaasdCallGraphController {
+func NewFaasdCallGraphController(autoscaler *FaasdAutoScalerController, client *containerd.Client, store FunctionStore, callGraphConfig callgraph.Config, logger *slog.Logger) *FaasdCallGraphController {
 	if logger == nil {
-		logger = zap.NewNop()
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
 	controller := &FaasdCallGraphController{
@@ -415,7 +416,7 @@ func (c *FaasdCallGraphController) executePrewarm(namespace, functionName string
 	}
 
 	if err := c.autoscaler.ScaleUpWithMode(namespace, functionName, false); err != nil {
-		c.logger.Debug("prewarm scale-up failed", zap.String("function", functionName), zap.Error(err))
+		c.logger.Debug("prewarm scale-up failed", "function", functionName, "err", err)
 		return
 	}
 }

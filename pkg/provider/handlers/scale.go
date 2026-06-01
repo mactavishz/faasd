@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/containerd/containerd"
@@ -34,7 +34,7 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 
 		req := types.ScaleServiceRequest{}
 		if err := json.Unmarshal(body, &req); err != nil {
-			log.Printf("[Scale] error parsing input: %s", err)
+			slog.Info(fmt.Sprintf("[Scale] error parsing input: %s", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
@@ -62,7 +62,7 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 		if _, exists := GetStoredFunction(namespace, name); !exists {
 			if _, err := GetFunction(client, name, namespace); err != nil {
 				msg := fmt.Sprintf("function: %s.%s not found", name, namespace)
-				log.Printf("[Scale] %s\n", msg)
+				slog.Info(fmt.Sprintf("[Scale] %s\n", msg))
 				http.Error(w, msg, http.StatusNotFound)
 				return
 			}
@@ -85,7 +85,7 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 				status, statusErr := task.Status(ctx)
 				if statusErr != nil {
 					msg := fmt.Sprintf("cannot load task status for %s, error: %s", name, statusErr)
-					log.Printf("[Scale] %s\n", msg)
+					slog.Info(fmt.Sprintf("[Scale] %s\n", msg))
 					http.Error(w, msg, http.StatusInternalServerError)
 					return
 				} else {
@@ -102,7 +102,7 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 
 			if err := autoScalerController.ScaleDownWhenIdle(namespace, name); err != nil {
 				msg := fmt.Sprintf("cannot scale down service %s, error: %s", name, err)
-				log.Printf("[Scale] %s\n", msg)
+				slog.Info(fmt.Sprintf("[Scale] %s\n", msg))
 				http.Error(w, msg, http.StatusBadRequest)
 				return
 			}
@@ -120,14 +120,14 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 			if taskStatus != nil {
 				if taskStatus.Status == containerd.Paused {
 					if _, err := task.Delete(ctx); err != nil {
-						log.Printf("[Scale] error deleting paused task %s, error: %s\n", name, err)
+						slog.Info(fmt.Sprintf("[Scale] error deleting paused task %s, error: %s\n", name, err))
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
 				} else if taskStatus.Status == containerd.Stopped {
 					// Stopped tasks cannot be restarted, must be removed, and created again
 					if _, err := task.Delete(ctx); err != nil {
-						log.Printf("[Scale] error deleting stopped task %s, error: %s\n", name, err)
+						slog.Info(fmt.Sprintf("[Scale] error deleting stopped task %s, error: %s\n", name, err))
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
@@ -141,7 +141,7 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 		if createNewTask {
 			if autoScalerController != nil {
 				if err := autoScalerController.ScaleUp(namespace, name); err != nil {
-					log.Printf("[Scale] error deploying %s, error: %s\n", name, err)
+					slog.Info(fmt.Sprintf("[Scale] error deploying %s, error: %s\n", name, err))
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
@@ -150,14 +150,14 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 
 			startInfo, err := createTask(ctx, ctr, cni)
 			if err != nil {
-				log.Printf("[Scale] error deploying %s, error: %s\n", name, err)
+				slog.Info(fmt.Sprintf("[Scale] error deploying %s, error: %s\n", name, err))
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 
-			log.Printf("[Ready] waiting for function %s.%s", name, namespace)
+			slog.Info(fmt.Sprintf("[Ready] waiting for function %s.%s", name, namespace))
 			if err := waitForFunctionReady(startInfo, name, namespace, functionReadyTimeout); err != nil {
-				log.Printf("[Scale] readiness failed for %s, error: %s\n", name, err)
+				slog.Info(fmt.Sprintf("[Scale] readiness failed for %s, error: %s\n", name, err))
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
@@ -24,7 +24,7 @@ func MakeSecretHandler(store provider.Labeller, mountPath string) func(w http.Re
 
 	err := os.MkdirAll(mountPath, secretFilePermission)
 	if err != nil {
-		log.Printf("Creating path: %s, error: %s\n", mountPath, err)
+		slog.Info(fmt.Sprintf("Creating path: %s, error: %s\n", mountPath, err))
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,7 @@ func listSecrets(store provider.Labeller, w http.ResponseWriter, r *http.Request
 	}
 
 	if err != nil {
-		log.Printf("[Secret] Error listing secrets: %s ", err)
+		slog.Info(fmt.Sprintf("[Secret] Error listing secrets: %s ", err))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -91,25 +91,25 @@ func listSecrets(store provider.Labeller, w http.ResponseWriter, r *http.Request
 func createSecret(w http.ResponseWriter, r *http.Request, mountPath string) {
 	secret, err := parseSecret(r)
 	if err != nil {
-		log.Printf("[secret] error %s", err.Error())
+		slog.Info(fmt.Sprintf("[secret] error %s", err.Error()))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	err = validateSecret(secret)
 	if err != nil {
-		log.Printf("[secret] error %s", err.Error())
+		slog.Info(fmt.Sprintf("[secret] error %s", err.Error()))
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("[secret] is valid: %q", secret.Name)
+	slog.Info(fmt.Sprintf("[secret] is valid: %q", secret.Name))
 	namespace := getRequestNamespace(secret.Namespace)
 	mountPath = getNamespaceSecretMountPath(mountPath, namespace)
 
 	err = os.MkdirAll(mountPath, secretDirPermission)
 	if err != nil {
-		log.Printf("[secret] error %s", err.Error())
+		slog.Info(fmt.Sprintf("[secret] error %s", err.Error()))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -122,7 +122,7 @@ func createSecret(w http.ResponseWriter, r *http.Request, mountPath string) {
 	err = os.WriteFile(path.Join(mountPath, secret.Name), data, secretFilePermission)
 
 	if err != nil {
-		log.Printf("[secret] error %s", err.Error())
+		slog.Info(fmt.Sprintf("[secret] error %s", err.Error()))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -131,7 +131,7 @@ func createSecret(w http.ResponseWriter, r *http.Request, mountPath string) {
 func deleteSecret(w http.ResponseWriter, r *http.Request, mountPath string) {
 	secret, err := parseSecret(r)
 	if err != nil {
-		log.Printf("[secret] error %s", err.Error())
+		slog.Info(fmt.Sprintf("[secret] error %s", err.Error()))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -142,7 +142,7 @@ func deleteSecret(w http.ResponseWriter, r *http.Request, mountPath string) {
 	err = os.Remove(path.Join(mountPath, secret.Name))
 
 	if err != nil {
-		log.Printf("[secret] error %s", err.Error())
+		slog.Info(fmt.Sprintf("[secret] error %s", err.Error()))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

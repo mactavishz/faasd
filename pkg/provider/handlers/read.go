@@ -2,7 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -36,7 +37,7 @@ func MakeReadHandler(client *containerd.Client) func(w http.ResponseWriter, r *h
 		if len(stored) == 0 {
 			fns, err := ListFunctions(client, lookupNamespace)
 			if err != nil {
-				log.Printf("[Read] error listing functions. Error: %s", err)
+				slog.Info(fmt.Sprintf("[Read] error listing functions. Error: %s", err))
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}

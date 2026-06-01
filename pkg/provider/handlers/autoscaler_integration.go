@@ -3,7 +3,8 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log"
+	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"github.com/openfaas/faas-provider/types"
 	"github.com/openfaas/faasd/pkg/cninetwork"
 	"github.com/openfaas/faasd/pkg/service"
-	"go.uber.org/zap"
 )
 
 var (
@@ -31,7 +31,7 @@ type FaasdAutoScalerController struct {
 	store          FunctionStore
 	baseSecretPath string
 	alwaysPull     bool
-	logger         *zap.Logger
+	logger         *slog.Logger
 	autoScaler     *autoscaler.AutoScaler
 }
 
@@ -67,9 +67,9 @@ func getAutoScalerController() *FaasdAutoScalerController {
 	return activeAutoScaler
 }
 
-func NewFaasdAutoScalerController(client *containerd.Client, cni gocni.CNI, store FunctionStore, baseSecretPath string, alwaysPull bool, cfg autoscaler.Config, logger *zap.Logger) *FaasdAutoScalerController {
+func NewFaasdAutoScalerController(client *containerd.Client, cni gocni.CNI, store FunctionStore, baseSecretPath string, alwaysPull bool, cfg autoscaler.Config, logger *slog.Logger) *FaasdAutoScalerController {
 	if logger == nil {
-		logger = zap.NewNop()
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	controller := &FaasdAutoScalerController{
 		client:         client,
@@ -191,7 +191,7 @@ func (f *FaasdAutoScalerController) ScaleDown(namespace, name string) error {
 	if function, err := GetFunction(f.client, name, namespace); err == nil {
 		if function.replicas != 0 {
 			if err := cninetwork.DeleteCNINetwork(ctx, f.cni, f.client, name); err != nil {
-				log.Printf("[Scale] error removing CNI network for %s.%s: %s", name, namespace, err)
+				f.logger.Error("error removing CNI network", "function", name, "namespace", namespace, "err", err)
 			}
 		}
 	}

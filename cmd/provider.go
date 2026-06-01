@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
@@ -22,7 +22,6 @@ import (
 	"github.com/openfaas/faasd/pkg/provider/config"
 	"github.com/openfaas/faasd/pkg/provider/handlers"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
 const secretDirPermission = 0755
@@ -42,16 +41,14 @@ func makeProviderCmd() *cobra.Command {
 func runProviderE(cmd *cobra.Command, _ []string) error {
 
 	logger := faasdlogs.CreateLogger()
-	defer logger.Sync()
-	undo := zap.RedirectStdLog(logger)
-	defer undo()
+	slog.SetDefault(logger)
 
 	config, providerConfig, err := config.ReadFromEnv(types.OsEnv{})
 	if err != nil {
 		return err
 	}
 
-	log.Printf("faasd-provider starting..\tService Timeout: %s\n", config.WriteTimeout.String())
+	logger.Info("faasd-provider starting", "service_timeout", config.WriteTimeout)
 	printVersion()
 
 	wd, err := os.Getwd()
@@ -102,11 +99,11 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 	handlers.SetAutoScalerController(autoScalerController)
 
 	if autoScalerConfig.Enabled {
-		log.Printf("Autoscaler enabled")
+		logger.Info("autoscaler enabled")
 		autoScalerController.Start()
 		defer autoScalerController.Stop()
 	} else {
-		log.Printf("Autoscaler disabled")
+		logger.Info("autoscaler disabled")
 	}
 
 	callGraphConfig, err := callgraph.NewConfigFromEnv("faasd")
@@ -118,24 +115,24 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 	handlers.SetCallGraphController(callGraphController)
 
 	if callGraphConfig.Enabled {
-		log.Printf("Callgraph enabled")
+		logger.Info("callgraph enabled")
 		switch callGraphConfig.Method {
 		case callgraph.SimpleMovingAverage:
-			log.Printf("Callgraph method: Simple Moving Average")
+			logger.Info("callgraph method configured", "method", "SMA")
 		case callgraph.ExponentialMovingAverage:
-			log.Printf("Callgraph method: Exponential Moving Average")
+			logger.Info("callgraph method configured", "method", "EMA")
 		default:
-			log.Printf("Callgraph method: Unknown, defaulting to Simple Moving Average")
+			logger.Info("callgraph method configured", "method", "unknown", "default", "SMA")
 		}
 		callGraphController.Start()
 		defer callGraphController.Stop()
 		if callGraphConfig.Prewarm.Enabled {
-			log.Printf("Callgraph prewarm enabled")
+			logger.Info("callgraph prewarm enabled")
 		} else {
-			log.Printf("Callgraph prewarm disabled")
+			logger.Info("callgraph prewarm disabled")
 		}
 	} else {
-		log.Printf("Callgraph disabled")
+		logger.Info("callgraph disabled")
 	}
 
 	invokeResolver := handlers.NewInvokeResolver(client)
@@ -180,7 +177,7 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 	bootstrap.Router().HandleFunc("/system/callgraph/edge", callgraphEdgeHandler).Methods(http.MethodGet)
 	bootstrap.Router().HandleFunc("/system/stats/function/{name:["+bootstrap.NameExpression+"]+}", statsFunctionHandler).Methods(http.MethodGet)
 
-	log.Printf("Listening on: 0.0.0.0:%d", *config.TCPPort)
+	logger.Info("listening", "address", fmt.Sprintf("0.0.0.0:%d", *config.TCPPort))
 	bootstrap.Serve(cmd.Context(), &bootstrapHandlers, config)
 	return nil
 }
@@ -216,7 +213,7 @@ func moveSecretsToDefaultNamespaceSecrets(baseSecretPath string, defaultNamespac
 					return err
 				}
 
-				log.Printf("[Migration] Copied %s to %s", oldPath, newPath)
+				slog.Info("migrated secret", "src", oldPath, "dst", newPath)
 			}
 		}
 	}

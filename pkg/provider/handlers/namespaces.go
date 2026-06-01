@@ -3,7 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/containerd/containerd"
@@ -31,14 +32,14 @@ func ListNamespaces(client *containerd.Client) []string {
 
 	namespaces, err := store.List(context.Background())
 	if err != nil {
-		log.Printf("Error listing namespaces: %s", err.Error())
+		slog.Info(fmt.Sprintf("Error listing namespaces: %s", err.Error()))
 		return set
 	}
 
 	for _, namespace := range namespaces {
 		labels, err := store.Labels(context.Background(), namespace)
 		if err != nil {
-			log.Printf("Error listing label for namespace %s: %s", namespace, err.Error())
+			slog.Info(fmt.Sprintf("Error listing label for namespace %s: %s", namespace, err.Error()))
 			continue
 		}
 

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/containerd/containerd"
@@ -36,7 +36,7 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerContr
 
 		req := types.DeleteFunctionRequest{}
 		if err := json.Unmarshal(body, &req); err != nil {
-			log.Printf("[Delete] error parsing input: %s", err)
+			slog.Info(fmt.Sprintf("[Delete] error parsing input: %s", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
@@ -65,7 +65,7 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerContr
 		function, err := GetFunction(client, name, namespace)
 		if err != nil {
 			msg := fmt.Sprintf("function %s.%s not found", name, namespace)
-			log.Printf("[Delete] %s\n", msg)
+			slog.Info(fmt.Sprintf("[Delete] %s\n", msg))
 			http.Error(w, msg, http.StatusNotFound)
 			return
 		}
@@ -76,12 +76,12 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerContr
 		if function.replicas != 0 {
 			err = cninetwork.DeleteCNINetwork(ctx, cni, client, name)
 			if err != nil {
-				log.Printf("[Delete] error removing CNI network for %s, %s\n", name, err)
+				slog.Info(fmt.Sprintf("[Delete] error removing CNI network for %s, %s\n", name, err))
 			}
 		}
 
 		if err := service.Remove(ctx, client, name); err != nil {
-			log.Printf("[Delete] error removing %s, %s\n", name, err)
+			slog.Info(fmt.Sprintf("[Delete] error removing %s, %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -95,6 +95,6 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerContr
 			autoScalerController.UnregisterFunction(namespace, name)
 		}
 
-		log.Printf("[Delete] Removed: %s.%s\n", name, namespace)
+		slog.Info(fmt.Sprintf("[Delete] Removed: %s.%s\n", name, namespace))
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"os"
@@ -54,7 +54,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		req := types.FunctionDeployment{}
 		err := json.Unmarshal(body, &req)
 		if err != nil {
-			log.Printf("[Deploy] - error parsing input: %s", err)
+			slog.Info(fmt.Sprintf("[Deploy] - error parsing input: %s", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
@@ -88,12 +88,12 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		if err := preDeploy(client, 1); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
-			log.Printf("[Deploy] error deploying %s, error: %s\n", name, err)
+			slog.Info(fmt.Sprintf("[Deploy] error deploying %s, error: %s\n", name, err))
 			return
 		}
 
 		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull); err != nil {
-			log.Printf("[Deploy] error deploying %s, error: %s\n", name, err)
+			slog.Info(fmt.Sprintf("[Deploy] error deploying %s, error: %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -132,7 +132,7 @@ func prepull(ctx context.Context, req types.FunctionDeployment, client *containe
 	}
 
 	size, _ := image.Size(ctx)
-	log.Printf("Image for: %s size: %d, took: %fs\n", image.Name(), size, time.Since(start).Seconds())
+	slog.Info(fmt.Sprintf("Image for: %s size: %d, took: %fs\n", image.Name(), size, time.Since(start).Seconds()))
 
 	return image, nil
 }
@@ -174,7 +174,7 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 
 		qty, err := resource.ParseQuantity(req.Limits.Memory)
 		if err != nil {
-			log.Printf("error parsing (%q) as quantity: %s", req.Limits.Memory, err.Error())
+			slog.Info(fmt.Sprintf("error parsing (%q) as quantity: %s", req.Limits.Memory, err.Error()))
 		}
 		v := qty.Value()
 		memory.Limit = &v
@@ -184,7 +184,7 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 	if req.Limits != nil && len(strings.TrimSpace(req.Limits.CPU)) > 0 {
 		cpu, err = buildCPULimit(req.Limits.CPU)
 		if err != nil {
-			log.Printf("error parsing (%q) as CPU limit: %s", req.Limits.CPU, err.Error())
+			slog.Info(fmt.Sprintf("error parsing (%q) as CPU limit: %s", req.Limits.CPU, err.Error()))
 		}
 	}
 
@@ -215,7 +215,7 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 
 	namespace := getRequestNamespace(req.Namespace)
 
-	log.Printf("[Ready] waiting for function %s.%s", name, namespace)
+	slog.Info(fmt.Sprintf("[Ready] waiting for function %s.%s", name, namespace))
 	if err := waitForFunctionReady(startInfo, name, namespace, functionReadyTimeout); err != nil {
 		return err
 	}
@@ -283,7 +283,7 @@ func createTask(ctx context.Context, container containerd.Container, cni gocni.C
 		return functionStartInfo{}, fmt.Errorf("unable to start task: %s, error: %w", name, taskErr)
 	}
 
-	log.Printf("Container ID: %s\tTask ID: %s\tTask PID: %d\t\n", name, task.ID(), task.Pid())
+	slog.Info(fmt.Sprintf("Container ID: %s\tTask ID: %s\tTask PID: %d\t\n", name, task.ID(), task.Pid()))
 
 	labels := map[string]string{}
 	_, err := cninetwork.CreateCNINetwork(ctx, cni, task, labels)
@@ -297,7 +297,7 @@ func createTask(ctx context.Context, container containerd.Container, cni gocni.C
 		return functionStartInfo{}, err
 	}
 
-	log.Printf("%s has IP: %s.\n", name, ip)
+	slog.Info(fmt.Sprintf("%s has IP: %s.\n", name, ip))
 
 	if _, err := task.Wait(ctx); err != nil {
 		return functionStartInfo{}, errors.Wrapf(err, "Unable to wait for task to start: %s", name)
@@ -490,6 +490,6 @@ func withCPU(cpu *specs.LinuxCPU) oci.SpecOpts {
 
 func preDeploy(client *containerd.Client, additional int64) error {
 	count, countNs, err := countFunctions(client)
-	log.Printf("Function count: %d, Namespace count: %d\n", count, countNs)
+	slog.Info(fmt.Sprintf("Function count: %d, Namespace count: %d\n", count, countNs))
 	return err
 }

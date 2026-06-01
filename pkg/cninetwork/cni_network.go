@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"path"
@@ -77,7 +77,7 @@ var defaultCNIConf = fmt.Sprintf(`
 // InitNetwork writes configlist file and initializes CNI network
 func InitNetwork() (gocni.CNI, error) {
 
-	log.Printf("Writing network config...\n")
+	slog.Info("Writing network config...\n")
 	if !dirExists(CNIConfDir) {
 		if err := os.MkdirAll(CNIConfDir, 0755); err != nil {
 			return nil, fmt.Errorf("cannot create directory: %s", CNIConfDir)
@@ -126,11 +126,11 @@ func DeleteCNINetwork(ctx context.Context, cni gocni.CNI, client *containerd.Cli
 	if containerErr == nil {
 		task, err := container.Task(ctx, nil)
 		if err != nil {
-			log.Printf("[Delete] unable to find task for container: %s\n", name)
+			slog.Info(fmt.Sprintf("[Delete] unable to find task for container: %s\n", name))
 			return nil
 		}
 
-		log.Printf("[Delete] removing CNI network for: %s\n", task.ID())
+		slog.Info(fmt.Sprintf("[Delete] removing CNI network for: %s\n", task.ID()))
 
 		id := netID(task)
 		netns := netNamespace(task)
@@ -138,7 +138,7 @@ func DeleteCNINetwork(ctx context.Context, cni gocni.CNI, client *containerd.Cli
 		if err := cni.Remove(ctx, id, netns); err != nil {
 			return errors.Wrapf(err, "Failed to remove network for task: %q, %v", id, err)
 		}
-		log.Printf("[Delete] removed: %s from namespace: %s, ID: %s\n", name, netns, id)
+		slog.Info(fmt.Sprintf("[Delete] removed: %s from namespace: %s, ID: %s\n", name, netns, id))
 
 		return nil
 	}

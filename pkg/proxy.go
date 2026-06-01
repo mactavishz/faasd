@@ -3,7 +3,7 @@ package pkg
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -51,7 +51,7 @@ func (p *Proxy) Start() error {
 		return err
 	}
 
-	log.Printf("Looking up IP for: %q", upstreamHost)
+	slog.Info(fmt.Sprintf("Looking up IP for: %q", upstreamHost))
 	got := make(chan string, 1)
 
 	go p.Resolver.Get(upstreamHost, got, time.Second*5)
@@ -62,11 +62,11 @@ func (p *Proxy) Start() error {
 	upstreamAddr := fmt.Sprintf("%s:%d", ipAddress, upstreamPort)
 
 	localBind := fmt.Sprintf("%s:%d", p.HostIP, p.Port)
-	log.Printf("Proxy from: %s, to: %s (%s)\n", localBind, p.Upstream, ipAddress)
+	slog.Info(fmt.Sprintf("Proxy from: %s, to: %s (%s)\n", localBind, p.Upstream, ipAddress))
 
 	l, err := net.Listen("tcp", localBind)
 	if err != nil {
-		log.Printf("Error: %s", err.Error())
+		slog.Info(fmt.Sprintf("Error: %s", err.Error()))
 		return err
 	}
 
@@ -75,9 +75,7 @@ func (p *Proxy) Start() error {
 		// Wait for a connection.
 		conn, err := l.Accept()
 		if err != nil {
-			log.Printf("Unable to accept on: %d, error: %s",
-				p.Port,
-				err.Error())
+			slog.Error("unable to accept connection", "port", p.Port, "err", err)
 			return err
 		}
 
@@ -85,7 +83,7 @@ func (p *Proxy) Start() error {
 		if err != nil {
 			conn.Close()
 
-			log.Printf("Unable to dial: %s, error: %s", upstreamAddr, err.Error())
+			slog.Info(fmt.Sprintf("Unable to dial: %s, error: %s", upstreamAddr, err.Error()))
 			continue
 		}
 

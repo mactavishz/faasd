@@ -1,7 +1,8 @@
 package pkg
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 
 	"github.com/openfaas/faasd/pkg/depgraph"
 )
@@ -12,9 +13,9 @@ func buildDeploymentOrder(svcs []Service) []string {
 
 	order := graph.Resolve()
 
-	log.Printf("Start-up order:\n")
+	slog.Info("Start-up order:\n")
 	for _, node := range order {
-		log.Printf("- %s\n", node)
+		slog.Info(fmt.Sprintf("- %s\n", node))
 	}
 
 	return order

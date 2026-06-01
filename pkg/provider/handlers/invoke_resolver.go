@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/url"
 
 	"github.com/containerd/containerd"
@@ -23,7 +23,7 @@ func NewInvokeResolver(client *containerd.Client) *InvokeResolver {
 // a function name (with optional namespace suffix) to a concrete watchdog URL.
 func (i *InvokeResolver) Resolve(functionName string) (url.URL, error) {
 	actualFunctionName := functionName
-	log.Printf("Resolve: %q\n", actualFunctionName)
+	slog.Info(fmt.Sprintf("Resolve: %q\n", actualFunctionName))
 
 	actualFunctionName, namespace := ParseFunctionNameNamespace(functionName)
 

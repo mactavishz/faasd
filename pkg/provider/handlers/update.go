@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -39,7 +39,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		req := types.FunctionDeployment{}
 		err := json.Unmarshal(body, &req)
 		if err != nil {
-			log.Printf("[Update] error parsing input: %s", err)
+			slog.Info(fmt.Sprintf("[Update] error parsing input: %s", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 
 			return
@@ -63,7 +63,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		if err := preDeploy(client, int64(0)); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
-			log.Printf("[Deploy] error deploying %s, error: %s\n", name, err)
+			slog.Info(fmt.Sprintf("[Deploy] error deploying %s, error: %s\n", name, err))
 			return
 		}
 
@@ -72,7 +72,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		function, err := GetFunction(client, name, namespace)
 		if err != nil {
 			msg := fmt.Sprintf("function: %s.%s not found", name, namespace)
-			log.Printf("[Update] %s\n", msg)
+			slog.Info(fmt.Sprintf("[Update] %s\n", msg))
 			http.Error(w, msg, http.StatusNotFound)
 			return
 		}
@@ -86,7 +86,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		ctx := namespaces.WithNamespace(context.Background(), namespace)
 
 		if _, err := prepull(ctx, req, client, alwaysPull); err != nil {
-			log.Printf("[Update] error with pre-pull: %s, %s\n", name, err)
+			slog.Info(fmt.Sprintf("[Update] error with pre-pull: %s, %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -113,7 +113,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 				if err != nil {
 					store.Put(previousStored)
 					msg := fmt.Sprintf("cannot safely scale down function %s.%s for update: %s", name, namespace, err)
-					log.Printf("[Update] %s\n", msg)
+					slog.Info(fmt.Sprintf("[Update] %s\n", msg))
 					http.Error(w, msg, http.StatusBadRequest)
 					return
 				}
@@ -121,7 +121,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 			if err := autoScalerController.ScaleUp(namespace, name); err != nil {
 				store.Put(previousStored)
-				log.Printf("[Update] error scaling up %s after update, error: %s\n", name, err)
+				slog.Info(fmt.Sprintf("[Update] error scaling up %s after update, error: %s\n", name, err))
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -133,12 +133,12 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		if function.replicas != 0 {
 			err = cninetwork.DeleteCNINetwork(ctx, cni, client, name)
 			if err != nil {
-				log.Printf("[Update] error removing CNI network for %s, %s\n", name, err)
+				slog.Info(fmt.Sprintf("[Update] error removing CNI network for %s, %s\n", name, err))
 			}
 		}
 
 		if err := service.Remove(ctx, client, name); err != nil {
-			log.Printf("[Update] error removing %s, %s\n", name, err)
+			slog.Info(fmt.Sprintf("[Update] error removing %s, %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -147,7 +147,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		pull := false
 
 		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull); err != nil {
-			log.Printf("[Update] error deploying %s, error: %s\n", name, err)
+			slog.Info(fmt.Sprintf("[Update] error deploying %s, error: %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

@@ -3,7 +3,7 @@ package pkg
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path"
 	"sort"
@@ -208,7 +208,7 @@ func (s *Supervisor) Start(svcs []Service) error {
 		})
 
 		if len(svc.User) > 0 {
-			log.Printf("Running %s with user: %q", svc.Name, svc.User)
+			slog.Info(fmt.Sprintf("Running %s with user: %q", svc.Name, svc.User))
 		}
 
 		newContainer, err := s.client.NewContainer(
@@ -226,54 +226,54 @@ func (s *Supervisor) Start(svcs []Service) error {
 		)
 
 		if err != nil {
-			log.Printf("Error creating container: %s", err)
+			slog.Info(fmt.Sprintf("Error creating container: %s", err))
 			return err
 		}
 
-		log.Printf("Created container: %s\n", newContainer.ID())
+		slog.Info(fmt.Sprintf("Created container: %s\n", newContainer.ID()))
 
 		task, err := newContainer.NewTask(ctx, cio.BinaryIO("/usr/local/bin/faasd", nil))
 		if err != nil {
-			log.Printf("Error creating task: %s", err)
+			slog.Info(fmt.Sprintf("Error creating task: %s", err))
 			return err
 		}
 
 		labels := map[string]string{}
 		_, err = cninetwork.CreateCNINetwork(ctx, s.cni, task, labels)
 		if err != nil {
-			log.Printf("Error creating CNI for %s: %s", svc.Name, err)
+			slog.Info(fmt.Sprintf("Error creating CNI for %s: %s", svc.Name, err))
 			return err
 		}
 
 		ip, err := cninetwork.GetIPAddress(svc.Name, task.Pid())
 		if err != nil {
-			log.Printf("Error getting IP for %s: %s", svc.Name, err)
+			slog.Info(fmt.Sprintf("Error getting IP for %s: %s", svc.Name, err))
 			return err
 		}
 
-		log.Printf("%s has IP: %s\n", newContainer.ID(), ip)
+		slog.Info(fmt.Sprintf("%s has IP: %s\n", newContainer.ID(), ip))
 
 		hosts, err := os.ReadFile(hostsFilePath)
 		if err != nil {
-			log.Printf("Unable to read hosts file: %s\n", err.Error())
+			slog.Info(fmt.Sprintf("Unable to read hosts file: %s\n", err.Error()))
 		}
 
 		hosts = appendServiceHosts(hosts, svc.Name, ip)
 
 		if err := os.WriteFile(hostsFilePath, hosts, workingDirectoryPermission); err != nil {
-			log.Printf("Error writing file: %s %s\n", "hosts", err)
+			slog.Info(fmt.Sprintf("Error writing file: %s %s\n", "hosts", err))
 		}
 
 		if _, err := task.Wait(ctx); err != nil {
-			log.Printf("Task wait error: %s", err)
+			slog.Info(fmt.Sprintf("Task wait error: %s", err))
 			return err
 		}
 
-		log.Printf("Task: %s\tContainer: %s\n", task.ID(), newContainer.ID())
-		// log.Println("Exited: ", exitStatusC)
+		slog.Info(fmt.Sprintf("Task: %s\tContainer: %s\n", task.ID(), newContainer.ID()))
+		// slog.Info(fmt.Sprint("Exited: ", exitStatusC))
 
 		if err = task.Start(ctx); err != nil {
-			log.Printf("Task start error: %s", err)
+			slog.Info(fmt.Sprintf("Task start error: %s", err))
 			return err
 		}
 	}
@@ -291,7 +291,7 @@ func (s *Supervisor) Remove(svcs []Service) error {
 	for _, svc := range svcs {
 		err := cninetwork.DeleteCNINetwork(ctx, s.cni, s.client, svc.Name)
 		if err != nil {
-			log.Printf("[Delete] error removing CNI network for %s, %s\n", svc.Name, err)
+			slog.Info(fmt.Sprintf("[Delete] error removing CNI network for %s, %s\n", svc.Name, err))
 			return err
 		}
 

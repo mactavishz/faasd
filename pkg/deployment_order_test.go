@@ -1,7 +1,8 @@
 package pkg
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"testing"
 )
 
@@ -139,9 +140,9 @@ func Test_buildDeploymentOrderComposeFile(t *testing.T) {
 	}
 
 	for _, s := range svcs {
-		log.Printf("Service: %s\n", s.Name)
+		slog.Info(fmt.Sprintf("Service: %s\n", s.Name))
 		for _, d := range s.DependsOn {
-			log.Printf("Link: %s => %s\n", s.Name, d)
+			slog.Info(fmt.Sprintf("Link: %s => %s\n", s.Name, d))
 		}
 	}
 

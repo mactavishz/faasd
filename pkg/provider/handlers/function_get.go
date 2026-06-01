@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -32,7 +32,7 @@ func GetFunction(client *containerd.Client, name string, namespace string) (Func
 	allLabels, labelErr := c.Labels(ctx)
 
 	if labelErr != nil {
-		log.Printf("cannot list container %s labels: %s", containerName, labelErr)
+		slog.Info(fmt.Sprintf("cannot list container %s labels: %s", containerName, labelErr))
 	}
 
 	labels, annotations := buildLabelsAndAnnotations(allLabels)
