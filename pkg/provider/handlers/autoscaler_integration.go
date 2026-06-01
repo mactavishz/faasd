@@ -144,7 +144,7 @@ func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold
 
 	start := time.Now()
 
-	if err := f.autoScaler.ScaleUpWhenReady(context.Background(), f.scaleKey(namespace, name)); err != nil {
+	if err := f.autoScaler.ScaleUpWhenReady(f.scaleKey(namespace, name)); err != nil {
 		return err
 	}
 
@@ -218,7 +218,7 @@ func (f *FaasdAutoScalerController) ScaleDownWhenIdle(namespace, name string) er
 	if !f.Enabled() {
 		return nil
 	}
-	return f.autoScaler.ScaleDownWhenIdle(context.Background(), f.scaleKey(namespace, name))
+	return f.autoScaler.ScaleDownWhenIdle(f.scaleKey(namespace, name))
 }
 
 func (f *FaasdAutoScalerController) restoreRuntime(namespace, name string) error {
