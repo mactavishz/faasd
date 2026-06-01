@@ -243,7 +243,7 @@ func (f *FaasdAutoScalerController) restoreRuntime(namespace, name string) error
 
 	secretMountPath := getNamespaceSecretMountPath(f.baseSecretPath, namespace)
 	req := stored.ToDeployment()
-	if err := deploy(ctx, req, f.client, f.cni, secretMountPath, f.alwaysPull); err != nil {
+	if err := deploy(ctx, req, f.client, f.cni, secretMountPath, f.alwaysPull, nil); err != nil {
 		return err
 	}
 

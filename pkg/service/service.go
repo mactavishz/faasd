@@ -1,13 +1,14 @@
 package service
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
-	"strconv"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -18,17 +19,16 @@ import (
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/config/configfile"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/layout"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sys/unix"
 )
 
 // dockerConfigDir contains "config.json"
 const dockerConfigDir = "/var/lib/faasd/.docker/"
 
-const devRegistryAliasEnvVar = "FAASD_DEV_REGISTRY_ALIAS"
-const devRegistryAliasDefault = "registry.local"
-const devRegistryPortEnvVar = "FAASD_DEV_REGISTRY_PORT"
-const devRegistryPortDefault = "5050"
-const devRegistryGatewayIPEnvVar = "FAASD_DEV_REGISTRY_GATEWAY_IP"
+const containerdImageNameAnnotation = "io.containerd.image.name"
 
 // Remove removes a container
 func Remove(ctx context.Context, client *containerd.Client, name string) error {
@@ -144,10 +144,8 @@ func killTask(ctx context.Context, task containerd.Task, gracePeriod time.Durati
 }
 
 func getResolver(configFile *configfile.ConfigFile) (remotes.Resolver, error) {
-	devRegistryAlias := getDevRegistryAlias()
-	devRegistryPort := getDevRegistryPort()
 	registryOpts := []docker.RegistryOpt{
-		docker.WithPlainHTTP(makePlainHTTPMatcher(devRegistryAlias)),
+		docker.WithPlainHTTP(docker.MatchLocalhost),
 	}
 
 	authOpts := []docker.AuthorizerOpt{}
@@ -174,146 +172,10 @@ func getResolver(configFile *configfile.ConfigFile) (remotes.Resolver, error) {
 	authorizer := docker.NewDockerAuthorizer(authOpts...)
 	registryOpts = append(registryOpts, docker.WithAuthorizer(authorizer))
 
-	defaultHosts := docker.ConfigureDefaultRegistries(registryOpts...)
-
 	opts := docker.ResolverOptions{
-		Hosts: func(namespace string) ([]docker.RegistryHost, error) {
-			hosts, err := defaultHosts(namespace)
-			if err != nil {
-				return nil, err
-			}
-
-			if !isDevRegistryAlias(namespace, devRegistryAlias) {
-				return hosts, nil
-			}
-
-			devRegistryGatewayIP, gatewayErr := detectHostGatewayIP()
-			if gatewayErr != nil {
-				return nil, fmt.Errorf("cannot resolve host gateway IP for %s: %w", devRegistryAlias, gatewayErr)
-			}
-
-			targetHost, shouldRewrite := resolveDevRegistryHost(namespace, devRegistryAlias, devRegistryPort, devRegistryGatewayIP)
-			if !shouldRewrite {
-				return hosts, nil
-			}
-
-			for i := range hosts {
-				hosts[i].Host = targetHost
-				hosts[i].Scheme = "http"
-			}
-
-			return hosts, nil
-		},
+		Hosts: docker.ConfigureDefaultRegistries(registryOpts...),
 	}
 	return docker.NewResolver(opts), nil
-}
-
-func makePlainHTTPMatcher(devRegistryAlias string) func(string) (bool, error) {
-	return func(host string) (bool, error) {
-		match, err := docker.MatchLocalhost(host)
-		if err != nil {
-			return false, err
-		}
-		if match {
-			return true, nil
-		}
-
-		if isDevRegistryAlias(host, devRegistryAlias) {
-			return true, nil
-		}
-
-		return false, nil
-	}
-}
-
-func resolveDevRegistryHost(namespace, devRegistryAlias, devRegistryPort, devRegistryGatewayIP string) (string, bool) {
-	if devRegistryGatewayIP == "" {
-		return "", false
-	}
-
-	hostName, port := splitHostAndPort(namespace)
-	if !strings.EqualFold(hostName, devRegistryAlias) {
-		return "", false
-	}
-
-	if port == "" {
-		port = devRegistryPort
-	}
-
-	return net.JoinHostPort(devRegistryGatewayIP, port), true
-}
-
-func isDevRegistryAlias(host, devRegistryAlias string) bool {
-	hostName, _ := splitHostAndPort(host)
-	return strings.EqualFold(hostName, devRegistryAlias)
-}
-
-func splitHostAndPort(value string) (string, string) {
-	host := strings.ToLower(strings.TrimSpace(value))
-	host = strings.TrimPrefix(host, "http://")
-	host = strings.TrimPrefix(host, "https://")
-	host = strings.TrimSuffix(host, "/")
-
-	if host == "" {
-		return "", ""
-	}
-
-	if strings.Contains(host, ":") {
-		if parsedHost, parsedPort, err := net.SplitHostPort(host); err == nil {
-			return parsedHost, parsedPort
-		}
-	}
-
-	return host, ""
-}
-
-func getDevRegistryAlias() string {
-	if value := strings.TrimSpace(os.Getenv(devRegistryAliasEnvVar)); value != "" {
-		return strings.ToLower(value)
-	}
-
-	return devRegistryAliasDefault
-}
-
-func getDevRegistryPort() string {
-	if value := strings.TrimSpace(os.Getenv(devRegistryPortEnvVar)); value != "" {
-		return value
-	}
-
-	return devRegistryPortDefault
-}
-
-func detectHostGatewayIP() (string, error) {
-	if value := strings.TrimSpace(os.Getenv(devRegistryGatewayIPEnvVar)); value != "" {
-		return value, nil
-	}
-
-	raw, err := os.ReadFile("/proc/net/route")
-	if err != nil {
-		return "", err
-	}
-
-	for _, line := range strings.Split(string(raw), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 || fields[1] != "00000000" {
-			continue
-		}
-
-		gatewayHex := fields[2]
-		parsed, parseErr := strconv.ParseUint(gatewayHex, 16, 32)
-		if parseErr != nil {
-			continue
-		}
-
-		ip := net.IPv4(byte(parsed), byte(parsed>>8), byte(parsed>>16), byte(parsed>>24))
-		if ip.IsUnspecified() {
-			continue
-		}
-
-		return ip.String(), nil
-	}
-
-	return "", fmt.Errorf("no default route found in /proc/net/route")
 }
 
 func PrepareImage(ctx context.Context, client *containerd.Client, imageName, snapshotter string, pullAlways bool) (containerd.Image, error) {
@@ -374,6 +236,194 @@ func PrepareImage(ctx context.Context, client *containerd.Client, imageName, sna
 	}
 
 	return image, nil
+}
+
+func PrepareOCIImageArchive(ctx context.Context, client *containerd.Client, archive io.ReadSeeker, imageName, snapshotter string) (containerd.Image, error) {
+	if err := validateOCIImageArchive(archive); err != nil {
+		return nil, err
+	}
+	if _, err := archive.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	if _, err := client.Import(ctx, archive, containerd.WithAllPlatforms(true), containerd.WithIndexName(imageName)); err != nil {
+		return nil, fmt.Errorf("cannot import OCI image archive: %w", err)
+	}
+
+	image, err := client.GetImage(ctx, imageName)
+	if err != nil {
+		return nil, err
+	}
+
+	unpacked, err := image.IsUnpacked(ctx, snapshotter)
+	if err != nil {
+		return nil, fmt.Errorf("cannot check if unpacked: %s", err)
+	}
+	if !unpacked {
+		if err := image.Unpack(ctx, snapshotter); err != nil {
+			return nil, fmt.Errorf("cannot unpack: %s", err)
+		}
+	}
+
+	return image, nil
+}
+
+func validateOCIImageArchive(archive io.ReadSeeker) error {
+	if _, err := archive.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	tmpDir, err := os.MkdirTemp("", "faasd-oci-archive-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := extractOCIArchive(archive, tmpDir); err != nil {
+		return err
+	}
+
+	index, err := layout.ImageIndexFromPath(tmpDir)
+	if err != nil {
+		return fmt.Errorf("unsupported image archive: expected OCI layout with oci-layout and index.json: %w", err)
+	}
+
+	result, err := inspectOCIImageIndex(index)
+	if err != nil {
+		return err
+	}
+	if !result.hostMatch {
+		return fmt.Errorf("OCI image archive does not contain a manifest for host platform %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	if len(result.refs) == 0 {
+		return fmt.Errorf("OCI image archive does not contain an image reference")
+	}
+	if len(result.refs) > 1 {
+		return fmt.Errorf("OCI image archive contains multiple image references")
+	}
+
+	return nil
+}
+
+type ociArchiveInspection struct {
+	refs      map[string]struct{}
+	hostMatch bool
+}
+
+func extractOCIArchive(archive io.Reader, dest string) error {
+	tr := tar.NewReader(archive)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read OCI archive: %w", err)
+		}
+
+		name := strings.TrimPrefix(filepath.Clean(hdr.Name), string(filepath.Separator))
+		name = strings.TrimPrefix(name, "./")
+		if name == "." || name == "" {
+			continue
+		}
+		if filepath.IsAbs(hdr.Name) || strings.HasPrefix(name, "../") || name == ".." {
+			return fmt.Errorf("OCI image archive contains unsafe path %q", hdr.Name)
+		}
+		if name == "manifest.json" {
+			return fmt.Errorf("Docker image archives are not supported; provide an OCI image archive")
+		}
+
+		target := filepath.Join(dest, name)
+		if !strings.HasPrefix(target, filepath.Clean(dest)+string(filepath.Separator)) && target != filepath.Clean(dest) {
+			return fmt.Errorf("OCI image archive contains unsafe path %q", hdr.Name)
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+			if err != nil {
+				return err
+			}
+			_, copyErr := io.Copy(file, tr)
+			closeErr := file.Close()
+			if copyErr != nil {
+				return fmt.Errorf("extract OCI archive file %s: %w", name, copyErr)
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+		case tar.TypeSymlink, tar.TypeLink:
+			return fmt.Errorf("OCI image archive contains unsupported link %q", hdr.Name)
+		default:
+			return fmt.Errorf("OCI image archive contains unsupported entry %q", hdr.Name)
+		}
+	}
+	return nil
+}
+
+func inspectOCIImageIndex(index v1.ImageIndex) (ociArchiveInspection, error) {
+	result := ociArchiveInspection{refs: map[string]struct{}{}}
+	if err := result.walkIndex(index); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (i *ociArchiveInspection) walkIndex(index v1.ImageIndex) error {
+	manifest, err := index.IndexManifest()
+	if err != nil {
+		return fmt.Errorf("read OCI index: %w", err)
+	}
+
+	for _, desc := range manifest.Manifests {
+		if ref := imageRefFromAnnotations(desc.Annotations); ref != "" {
+			i.refs[ref] = struct{}{}
+		}
+
+		if desc.MediaType.IsImage() {
+			if isRealPlatform(desc.Platform) && desc.Platform.Satisfies(v1.Platform{OS: runtime.GOOS, Architecture: runtime.GOARCH}) {
+				i.hostMatch = true
+			}
+			continue
+		}
+
+		if !desc.MediaType.IsIndex() {
+			continue
+		}
+
+		nested, err := index.ImageIndex(desc.Digest)
+		if err != nil {
+			return fmt.Errorf("read nested OCI index %s: %w", desc.Digest, err)
+		}
+		if err := i.walkIndex(nested); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isRealPlatform(platform *v1.Platform) bool {
+	return platform != nil && platform.OS != "" && platform.Architecture != "" && platform.OS != "unknown" && platform.Architecture != "unknown"
+}
+
+func imageRefFromAnnotations(annotations map[string]string) string {
+	if annotations == nil {
+		return ""
+	}
+	if ref := strings.TrimSpace(annotations[containerdImageNameAnnotation]); ref != "" {
+		return ref
+	}
+	if ref := strings.TrimSpace(annotations[ocispec.AnnotationRefName]); ref != "" {
+		return ref
+	}
+	return ""
 }
 
 func pullImage(ctx context.Context, client *containerd.Client, resolver remotes.Resolver, imageName string) (containerd.Image, error) {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path"
@@ -49,10 +50,10 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		defer r.Body.Close()
 
-		body, _ := io.ReadAll(r.Body)
-
-		req := types.FunctionDeployment{}
-		err := json.Unmarshal(body, &req)
+		req, imageArchive, closeArchive, err := readFunctionDeploymentRequest(r)
+		if closeArchive != nil {
+			defer closeArchive()
+		}
 		if err != nil {
 			slog.Info(fmt.Sprintf("[Deploy] - error parsing input: %s", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -92,7 +93,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			return
 		}
 
-		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull); err != nil {
+		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, alwaysPull, imageArchive); err != nil {
 			slog.Info(fmt.Sprintf("[Deploy] error deploying %s, error: %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -109,22 +110,70 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 	}
 }
 
+func readFunctionDeploymentRequest(r *http.Request) (types.FunctionDeployment, multipart.File, func(), error) {
+	contentType := strings.ToLower(r.Header.Get("Content-Type"))
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			return types.FunctionDeployment{}, nil, nil, err
+		}
+
+		raw := r.FormValue("deployment")
+		if strings.TrimSpace(raw) == "" {
+			return types.FunctionDeployment{}, nil, nil, fmt.Errorf("multipart deployment field is required")
+		}
+
+		req := types.FunctionDeployment{}
+		if err := json.Unmarshal([]byte(raw), &req); err != nil {
+			return types.FunctionDeployment{}, nil, nil, err
+		}
+
+		file, _, err := r.FormFile("image")
+		if err != nil {
+			return types.FunctionDeployment{}, nil, nil, fmt.Errorf("multipart image file is required: %w", err)
+		}
+
+		return req, file, func() {
+			_ = file.Close()
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
+		}, nil
+	}
+
+	body, _ := io.ReadAll(r.Body)
+	req := types.FunctionDeployment{}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return types.FunctionDeployment{}, nil, nil, err
+	}
+	return req, nil, nil, nil
+}
+
 // prepull is an optimization which means an image can be pulled before a deployment
 // request, since a deployment request first deletes the active function before
 // trying to deploy a new one.
-func prepull(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, alwaysPull bool) (containerd.Image, error) {
+func prepull(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, alwaysPull bool, imageArchive io.ReadSeeker) (containerd.Image, error) {
 	start := time.Now()
+	snapshotter := ""
+	if val, ok := os.LookupEnv("snapshotter"); ok {
+		snapshotter = val
+	}
+
+	if imageArchive != nil {
+		image, err := service.PrepareOCIImageArchive(ctx, client, imageArchive, req.Image, snapshotter)
+		if err != nil {
+			return nil, err
+		}
+		size, _ := image.Size(ctx)
+		slog.Info(fmt.Sprintf("Imported OCI image archive for: %s size: %d, took: %fs\n", image.Name(), size, time.Since(start).Seconds()))
+		return image, nil
+	}
+
 	r, err := reference.ParseNormalizedNamed(req.Image)
 	if err != nil {
 		return nil, err
 	}
 
 	imgRef := reference.TagNameOnly(r).String()
-
-	snapshotter := ""
-	if val, ok := os.LookupEnv("snapshotter"); ok {
-		snapshotter = val
-	}
 
 	image, err := service.PrepareImage(ctx, client, imgRef, snapshotter, alwaysPull)
 	if err != nil {
@@ -137,14 +186,14 @@ func prepull(ctx context.Context, req types.FunctionDeployment, client *containe
 	return image, nil
 }
 
-func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool) error {
+func deploy(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, imageArchive io.ReadSeeker) error {
 
 	snapshotter := ""
 	if val, ok := os.LookupEnv("snapshotter"); ok {
 		snapshotter = val
 	}
 
-	image, err := prepull(ctx, req, client, alwaysPull)
+	image, err := prepull(ctx, req, client, alwaysPull, imageArchive)
 	if err != nil {
 		return err
 	}

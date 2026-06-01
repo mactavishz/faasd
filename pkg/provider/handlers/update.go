@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -14,7 +12,6 @@ import (
 	"github.com/containerd/containerd/namespaces"
 	gocni "github.com/containerd/go-cni"
 	"github.com/mactavishz/FaaS-Platform-Knowledge-Optimization/autoscaler"
-	"github.com/openfaas/faas-provider/types"
 
 	"github.com/openfaas/faasd/pkg/cninetwork"
 	"github.com/openfaas/faasd/pkg/service"
@@ -34,10 +31,10 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		defer r.Body.Close()
 
-		body, _ := io.ReadAll(r.Body)
-
-		req := types.FunctionDeployment{}
-		err := json.Unmarshal(body, &req)
+		req, imageArchive, closeArchive, err := readFunctionDeploymentRequest(r)
+		if closeArchive != nil {
+			defer closeArchive()
+		}
 		if err != nil {
 			slog.Info(fmt.Sprintf("[Update] error parsing input: %s", err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -85,7 +82,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		ctx := namespaces.WithNamespace(context.Background(), namespace)
 
-		if _, err := prepull(ctx, req, client, alwaysPull); err != nil {
+		if _, err := prepull(ctx, req, client, alwaysPull, imageArchive); err != nil {
 			slog.Info(fmt.Sprintf("[Update] error with pre-pull: %s, %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -146,7 +143,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		// The pull has already been done in prepull, so we can force this pull to "false"
 		pull := false
 
-		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull); err != nil {
+		if err := deploy(ctx, req, client, cni, namespaceSecretMountPath, pull, nil); err != nil {
 			slog.Info(fmt.Sprintf("[Update] error deploying %s, error: %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
