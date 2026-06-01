@@ -57,9 +57,8 @@ func (s *ExampleFunctionsSuite) TestRemoteImageEchoJS() {
 	assert.True(t, hasUserAgent, "expected user-agent header in response")
 }
 
-func (s *ExampleFunctionsSuite) TestLocalBuildPushEchoJS() {
+func (s *ExampleFunctionsSuite) TestLocalOCIArchiveEchoJS() {
 	t := s.T()
-	testutil.RequireLocalRegistryReachable(t)
 
 	repoRoot := testutil.RepoRoot(t)
 	stackPath := filepath.Join(repoRoot, "faasd", "test", "fns", "echo-js", "stack.yaml")
@@ -69,7 +68,6 @@ func (s *ExampleFunctionsSuite) TestLocalBuildPushEchoJS() {
 	testutil.RemoveFunction(t, fnName, s.baseURL)
 	t.Cleanup(func() { testutil.RemoveFunction(t, fnName, s.baseURL) })
 	testutil.BuildStack(t, stackPath)
-	testutil.PushStack(t, stackPath)
 	testutil.DeployStack(t, stackPath, s.baseURL)
 
 	payload := []byte("hello from local image")
