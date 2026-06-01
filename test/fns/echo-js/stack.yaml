@@ -6,7 +6,8 @@ functions:
   echo-js:
     lang: node24
     handler: ./handler
-    image: registry.local:5050/faasd/echo-js:latest
+    image: ./dist/echo-js.tar
+    platforms: linux/amd64,linux/arm64
     limits:
       cpu: 0.25
       memory: 256Mi
