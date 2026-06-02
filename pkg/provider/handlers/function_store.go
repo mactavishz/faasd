@@ -22,6 +22,7 @@ type StoredFunction struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DesiredReplicas uint64
+	ArchiveBacked   bool
 }
 
 type FunctionStore interface {
@@ -98,6 +99,10 @@ func (s *InMemoryFunctionStore) List(namespace string) []StoredFunction {
 }
 
 func NewStoredFunctionFromDeployment(req types.FunctionDeployment, namespace string) StoredFunction {
+	return NewStoredFunctionFromDeploymentWithSource(req, namespace, false)
+}
+
+func NewStoredFunctionFromDeploymentWithSource(req types.FunctionDeployment, namespace string, archiveBacked bool) StoredFunction {
 	labels := map[string]string{}
 	if req.Labels != nil {
 		for k, v := range *req.Labels {
@@ -136,6 +141,7 @@ func NewStoredFunctionFromDeployment(req types.FunctionDeployment, namespace str
 		EnvProcess:      req.EnvProcess,
 		Limits:          limits,
 		DesiredReplicas: 1,
+		ArchiveBacked:   archiveBacked,
 	}
 }
 

@@ -268,6 +268,25 @@ func PrepareOCIImageArchive(ctx context.Context, client *containerd.Client, arch
 	return image, nil
 }
 
+func PrepareLocalImage(ctx context.Context, client *containerd.Client, imageName, snapshotter string) (containerd.Image, error) {
+	image, err := client.GetImage(ctx, imageName)
+	if err != nil {
+		return nil, fmt.Errorf("archive-backed image %q is missing from local containerd store: %w", imageName, err)
+	}
+
+	unpacked, err := image.IsUnpacked(ctx, snapshotter)
+	if err != nil {
+		return nil, fmt.Errorf("cannot check if unpacked: %s", err)
+	}
+	if !unpacked {
+		if err := image.Unpack(ctx, snapshotter); err != nil {
+			return nil, fmt.Errorf("cannot unpack: %s", err)
+		}
+	}
+
+	return image, nil
+}
+
 func validateOCIImageArchive(archive io.ReadSeeker) error {
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
 		return err

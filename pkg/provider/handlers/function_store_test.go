@@ -150,6 +150,30 @@ func TestNewStoredFunctionFromDeployment_CopiesAllMutableData(t *testing.T) {
 	}
 }
 
+func TestNewStoredFunctionFromDeploymentWithSource_PreservesArchiveBacked(t *testing.T) {
+	req := types.FunctionDeployment{Service: "fn", Image: "faasd.local/fn:latest"}
+
+	stored := NewStoredFunctionFromDeploymentWithSource(req, "openfaas-fn", true)
+	if !stored.ArchiveBacked {
+		t.Fatal("expected archive-backed deployment metadata to be preserved")
+	}
+
+	store := NewInMemoryFunctionStore()
+	store.Put(stored)
+	got, ok := store.Get("openfaas-fn", "fn")
+	if !ok {
+		t.Fatal("expected function in store")
+	}
+	if !got.ArchiveBacked {
+		t.Fatal("expected archive-backed flag to survive store round-trip")
+	}
+
+	dep := got.ToDeployment()
+	if dep.Image != "faasd.local/fn:latest" {
+		t.Fatalf("expected local image ref to survive restore conversion, got %q", dep.Image)
+	}
+}
+
 func TestNewStoredFunctionFromRuntime_ConvertsLimitsAndCopiesData(t *testing.T) {
 	created := time.Now().Add(-time.Minute)
 	fn := Function{

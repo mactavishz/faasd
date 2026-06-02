@@ -99,7 +99,7 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			return
 		}
 
-		stored := PutFunctionFromDeployment(req, namespace)
+		stored := PutFunctionFromDeploymentWithSource(req, namespace, imageArchive != nil)
 		RegisterCallGraphFunction(client, namespace, name, stored.Labels)
 		if callGraphController != nil {
 			callGraphController.recordScaleUp(name, time.Since(start), true)
@@ -198,6 +198,10 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 		return err
 	}
 
+	return deployPreparedImage(ctx, req, client, cni, secretMountPath, image, snapshotter)
+}
+
+func deployPreparedImage(ctx context.Context, req types.FunctionDeployment, client *containerd.Client, cni gocni.CNI, secretMountPath string, image containerd.Image, snapshotter string) error {
 	envs := prepareEnv(req.EnvProcess, req.EnvVars)
 	mounts := getOSMounts()
 

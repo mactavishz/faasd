@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
@@ -62,8 +63,9 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerContr
 
 		name := req.FunctionName
 
+		stored, hasStored := GetStoredFunction(namespace, name)
 		function, err := GetFunction(client, name, namespace)
-		if err != nil {
+		if err != nil && !hasStored {
 			msg := fmt.Sprintf("function %s.%s not found", name, namespace)
 			slog.Info(fmt.Sprintf("[Delete] %s\n", msg))
 			http.Error(w, msg, http.StatusNotFound)
@@ -73,7 +75,7 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerContr
 		ctx := namespaces.WithNamespace(context.Background(), namespace)
 
 		// TODO: this needs to still happen if the task is paused
-		if function.replicas != 0 {
+		if err == nil && function.replicas != 0 {
 			err = cninetwork.DeleteCNINetwork(ctx, cni, client, name)
 			if err != nil {
 				slog.Info(fmt.Sprintf("[Delete] error removing CNI network for %s, %s\n", name, err))
@@ -84,6 +86,14 @@ func MakeDeleteHandler(client *containerd.Client, cni gocni.CNI, autoScalerContr
 			slog.Info(fmt.Sprintf("[Delete] error removing %s, %s\n", name, err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		if hasStored && stored.ArchiveBacked {
+			if err := client.ImageService().Delete(ctx, stored.Image); err != nil && !strings.Contains(err.Error(), "not found") {
+				slog.Info(fmt.Sprintf("[Delete] error removing archive-backed image %s for %s, %s\n", stored.Image, name, err))
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 
 		DeleteStoredFunction(namespace, name)

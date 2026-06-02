@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -243,11 +244,21 @@ func (f *FaasdAutoScalerController) restoreRuntime(namespace, name string) error
 
 	secretMountPath := getNamespaceSecretMountPath(f.baseSecretPath, namespace)
 	req := stored.ToDeployment()
-	if err := deploy(ctx, req, f.client, f.cni, secretMountPath, f.alwaysPull, nil); err != nil {
-		return err
+	if stored.ArchiveBacked {
+		snapshotter := ""
+		if val, ok := os.LookupEnv("snapshotter"); ok {
+			snapshotter = val
+		}
+
+		image, err := service.PrepareLocalImage(ctx, f.client, stored.Image, snapshotter)
+		if err != nil {
+			return err
+		}
+
+		return deployPreparedImage(ctx, req, f.client, f.cni, secretMountPath, image, snapshotter)
 	}
 
-	return nil
+	return deploy(ctx, req, f.client, f.cni, secretMountPath, f.alwaysPull, nil)
 }
 
 func (f *FaasdAutoScalerController) runtimeAvailable(namespace, name string) bool {
@@ -379,8 +390,12 @@ func BuildFunctionStatus(client *containerd.Client, stored StoredFunction) types
 }
 
 func PutFunctionFromDeployment(req types.FunctionDeployment, namespace string) StoredFunction {
+	return PutFunctionFromDeploymentWithSource(req, namespace, false)
+}
+
+func PutFunctionFromDeploymentWithSource(req types.FunctionDeployment, namespace string, archiveBacked bool) StoredFunction {
 	store := getFunctionStore()
-	stored := NewStoredFunctionFromDeployment(req, namespace)
+	stored := NewStoredFunctionFromDeploymentWithSource(req, namespace, archiveBacked)
 	store.Put(stored)
 	return stored
 }

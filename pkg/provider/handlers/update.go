@@ -88,7 +88,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			return
 		}
 
-		newStored := NewStoredFunctionFromDeployment(req, namespace)
+		newStored := NewStoredFunctionFromDeploymentWithSource(req, namespace, imageArchive != nil)
 		previousStored, hadPrevious := GetStoredFunction(namespace, name)
 		if !hadPrevious {
 			previousStored = NewStoredFunctionFromRuntime(function)
@@ -149,7 +149,7 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			return
 		}
 
-		PutFunctionFromDeployment(req, namespace)
+		PutFunctionFromDeploymentWithSource(req, namespace, imageArchive != nil)
 		RegisterCallGraphFunction(client, namespace, name, newStored.Labels)
 		if callGraphController != nil {
 			callGraphController.recordScaleUp(name, time.Since(start), true)

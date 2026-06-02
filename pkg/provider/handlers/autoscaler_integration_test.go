@@ -30,6 +30,31 @@ func TestSetFunctionStore_NilResetsToInMemoryStore(t *testing.T) {
 	}
 }
 
+func TestPutFunctionFromDeploymentWithSource_PreservesArchiveBacked(t *testing.T) {
+	store := NewInMemoryFunctionStore()
+	SetFunctionStore(store)
+	t.Cleanup(func() { SetFunctionStore(nil) })
+
+	stored := PutFunctionFromDeploymentWithSource(types.FunctionDeployment{
+		Service: "fn",
+		Image:   "faasd.local/fn:latest",
+	}, "openfaas-fn", true)
+	if !stored.ArchiveBacked {
+		t.Fatal("expected helper return value to be archive-backed")
+	}
+
+	got, ok := GetStoredFunction("openfaas-fn", "fn")
+	if !ok {
+		t.Fatal("expected stored function")
+	}
+	if !got.ArchiveBacked {
+		t.Fatal("expected archive-backed flag in active store")
+	}
+	if got.Image != "faasd.local/fn:latest" {
+		t.Fatalf("expected local image ref, got %q", got.Image)
+	}
+}
+
 func TestSetFunctionStore_CustomStoreBacksHelpers(t *testing.T) {
 	store := NewInMemoryFunctionStore()
 	SetFunctionStore(store)
