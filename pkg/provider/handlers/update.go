@@ -68,6 +68,14 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 
 		namespaceSecretMountPath := getNamespaceSecretMountPath(secretMountPath, namespace)
 
+		previousStored, hadPrevious := GetStoredFunction(namespace, name)
+		if !hadPrevious {
+			msg := fmt.Sprintf("function: %s.%s not found", name, namespace)
+			slog.Info(fmt.Sprintf("[Update] %s\n", msg))
+			http.Error(w, msg, http.StatusNotFound)
+			return
+		}
+
 		function, err := GetFunction(client, name, namespace)
 		if err != nil {
 			msg := fmt.Sprintf("function: %s.%s not found", name, namespace)
@@ -91,10 +99,6 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 		}
 
 		newStored := NewStoredFunctionFromDeploymentWithSource(req, namespace, imageArchive != nil)
-		previousStored, hadPrevious := GetStoredFunction(namespace, name)
-		if !hadPrevious {
-			previousStored = NewStoredFunctionFromRuntime(function)
-		}
 
 		if callGraphController != nil {
 			callGraphController.resetFunction(name)
