@@ -140,14 +140,16 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 	alwaysPull := false
 	functionProxy := proxy.NewHandlerFuncWithLifecycle(*config, invokeResolver, false, handlers.NewInvokeLifecycle(autoScalerController, callGraphController))
 	functionProxy = handlers.MakeFunctionStatsMiddleware(functionProxy)
+	deployFunction := httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController, providerConfig.ArchiveUploadTimeout))
+	updateFunction := httpHeaderMiddleware(handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController, providerConfig.ArchiveUploadTimeout))
 	bootstrapHandlers := types.FaaSHandlers{
 		FunctionProxy:   httpHeaderMiddleware(functionProxy),
 		DeleteFunction:  httpHeaderMiddleware(handlers.MakeDeleteHandler(client, cni, autoScalerController, callGraphController)),
-		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController, providerConfig.ArchiveUploadTimeout)),
+		DeployFunction:  deployFunction,
 		FunctionLister:  httpHeaderMiddleware(handlers.MakeReadHandler(client)),
 		FunctionStatus:  httpHeaderMiddleware(handlers.MakeReplicaReaderHandler(client)),
 		ScaleFunction:   httpHeaderMiddleware(handlers.MakeReplicaUpdateHandler(client, cni, autoScalerController, callGraphController)),
-		UpdateFunction:  httpHeaderMiddleware(handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController, providerConfig.ArchiveUploadTimeout)),
+		UpdateFunction:  updateFunction,
 		Health:          httpHeaderMiddleware(func(w http.ResponseWriter, r *http.Request) {}),
 		Info:            httpHeaderMiddleware(handlers.MakeInfoHandler(faasd.Version, faasd.GitCommit)),
 		ListNamespaces:  httpHeaderMiddleware(handlers.MakeNamespacesLister(client)),
@@ -170,8 +172,14 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 		callgraphFunctionHandler = auth.DecorateWithBasicAuth(callgraphFunctionHandler, credentials)
 		callgraphEdgeHandler = auth.DecorateWithBasicAuth(callgraphEdgeHandler, credentials)
 		statsFunctionHandler = auth.DecorateWithBasicAuth(statsFunctionHandler, credentials)
+		deployFunction = auth.DecorateWithBasicAuth(deployFunction, credentials)
+		updateFunction = auth.DecorateWithBasicAuth(updateFunction, credentials)
 	}
 
+	// Register archive-capable deploy/update routes before faas-provider wraps
+	// them with metrics, otherwise ResponseController cannot update deadlines.
+	bootstrap.Router().HandleFunc("/system/functions", deployFunction).Methods(http.MethodPost)
+	bootstrap.Router().HandleFunc("/system/functions", updateFunction).Methods(http.MethodPut)
 	bootstrap.Router().HandleFunc("/system/callgraph", callgraphHandler).Methods(http.MethodGet)
 	bootstrap.Router().HandleFunc("/system/callgraph/function/{name:["+bootstrap.NameExpression+"]+}", callgraphFunctionHandler).Methods(http.MethodGet)
 	bootstrap.Router().HandleFunc("/system/callgraph/edge", callgraphEdgeHandler).Methods(http.MethodGet)
