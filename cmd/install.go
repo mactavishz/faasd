@@ -138,6 +138,7 @@ func writeGatewayEnv(filePath string) error {
 		"read_timeout=60s",
 		"write_timeout=60s",
 		"upstream_timeout=65s",
+		"archive_upload_timeout=10m5s",
 		"faas_nats_address=127.0.0.1",
 		"faas_nats_port=4222",
 		"faas_prometheus_host=127.0.0.1",

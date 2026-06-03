@@ -114,7 +114,7 @@ func readFunctionDeploymentRequest(r *http.Request) (types.FunctionDeployment, m
 	contentType := strings.ToLower(r.Header.Get("Content-Type"))
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
-			return types.FunctionDeployment{}, nil, nil, err
+			return types.FunctionDeployment{}, nil, nil, normalizeMultipartUploadError(err)
 		}
 
 		raw := r.FormValue("deployment")
@@ -129,7 +129,7 @@ func readFunctionDeploymentRequest(r *http.Request) (types.FunctionDeployment, m
 
 		file, _, err := r.FormFile("image")
 		if err != nil {
-			return types.FunctionDeployment{}, nil, nil, fmt.Errorf("multipart image file is required: %w", err)
+			return types.FunctionDeployment{}, nil, nil, fmt.Errorf("multipart image file is required: %w", normalizeMultipartUploadError(err))
 		}
 
 		return req, file, func() {
@@ -146,6 +146,16 @@ func readFunctionDeploymentRequest(r *http.Request) (types.FunctionDeployment, m
 		return types.FunctionDeployment{}, nil, nil, err
 	}
 	return req, nil, nil, nil
+}
+
+func normalizeMultipartUploadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected eof") {
+		return fmt.Errorf("incomplete archive upload: multipart body ended unexpectedly")
+	}
+	return err
 }
 
 // prepull is an optimization which means an image can be pulled before a deployment

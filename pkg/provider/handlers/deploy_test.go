@@ -1,15 +1,56 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/containerd/containerd/oci"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/openfaas/faas-provider/types"
 )
+
+func Test_readFunctionDeploymentRequest_TruncatedMultipartError(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	field, err := writer.CreateFormField("deployment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := field.Write([]byte(`{"service":"echo","image":"faasd.local/echo:latest"}`)); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("image", "echo.tar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("archive")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := body.Bytes()
+	req := httptest.NewRequest(http.MethodPost, "/system/functions", bytes.NewReader(payload[:len(payload)-8]))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	_, _, _, err = readFunctionDeploymentRequest(req)
+	if err == nil {
+		t.Fatal("expected truncated multipart error, got nil")
+	}
+
+	want := "incomplete archive upload: multipart body ended unexpectedly"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected error %q, got %q", want, err.Error())
+	}
+}
 
 func Test_BuildLabels_WithAnnotations(t *testing.T) {
 	// Test each combination of nil/non-nil annotation + label
