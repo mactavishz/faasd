@@ -40,13 +40,15 @@ const (
 // MakeDeployHandler handles POST /system/functions on the faasd provider.
 // The gateway forwards deploy requests here, and this handler validates input,
 // creates function runtime resources, then stores metadata for status/scaling.
-func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController) func(w http.ResponseWriter, r *http.Request) {
+func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController, archiveUploadTimeout time.Duration) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		if r.Body == nil {
 			http.Error(w, "expected a body", http.StatusBadRequest)
 			return
 		}
+
+		extendArchiveUploadDeadlines(w, r, archiveUploadTimeout)
 
 		defer r.Body.Close()
 
@@ -108,6 +110,27 @@ func MakeDeployHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			autoScalerController.RegisterFunctionWithState(namespace, name, ensureFunctionLabelsForAutoscaler(stored.Labels), autoscaler.StateActive)
 		}
 	}
+}
+
+func extendArchiveUploadDeadlines(w http.ResponseWriter, r *http.Request, timeout time.Duration) {
+	if !isArchiveUploadRequest(r) {
+		return
+	}
+
+	deadline := time.Now().Add(timeout)
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(deadline)
+	_ = controller.SetWriteDeadline(deadline)
+}
+
+func isArchiveUploadRequest(r *http.Request) bool {
+	if r.URL.Path != "/system/functions" {
+		return false
+	}
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
 }
 
 func readFunctionDeploymentRequest(r *http.Request) (types.FunctionDeployment, multipart.File, func(), error) {

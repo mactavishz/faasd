@@ -10,11 +10,28 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/containerd/containerd/oci"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/openfaas/faas-provider/types"
 )
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	readDeadline  time.Time
+	writeDeadline time.Time
+}
+
+func (d *deadlineRecorder) SetReadDeadline(deadline time.Time) error {
+	d.readDeadline = deadline
+	return nil
+}
+
+func (d *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	d.writeDeadline = deadline
+	return nil
+}
 
 func Test_readFunctionDeploymentRequest_TruncatedMultipartError(t *testing.T) {
 	var body bytes.Buffer
@@ -49,6 +66,71 @@ func Test_readFunctionDeploymentRequest_TruncatedMultipartError(t *testing.T) {
 	want := "incomplete archive upload: multipart body ended unexpectedly"
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("expected error %q, got %q", want, err.Error())
+	}
+}
+
+func Test_extendArchiveUploadDeadlines_MultipartDeployAndUpdate(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		t.Run(method, func(t *testing.T) {
+			req := httptest.NewRequest(method, "/system/functions", strings.NewReader("body"))
+			req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+			rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			before := time.Now()
+
+			extendArchiveUploadDeadlines(rec, req, 3*time.Minute)
+
+			if rec.readDeadline.Before(before.Add(3 * time.Minute)) {
+				t.Fatalf("expected read deadline to use archive timeout, got %s", rec.readDeadline)
+			}
+			if rec.writeDeadline.Before(before.Add(3 * time.Minute)) {
+				t.Fatalf("expected write deadline to use archive timeout, got %s", rec.writeDeadline)
+			}
+		})
+	}
+}
+
+func Test_extendArchiveUploadDeadlines_OnlyMultipartFunctionsRoute(t *testing.T) {
+	tests := []struct {
+		name        string
+		method      string
+		path        string
+		contentType string
+	}{
+		{
+			name:        "json deploy",
+			method:      http.MethodPost,
+			path:        "/system/functions",
+			contentType: "application/json",
+		},
+		{
+			name:        "multipart list",
+			method:      http.MethodGet,
+			path:        "/system/functions",
+			contentType: "multipart/form-data; boundary=test",
+		},
+		{
+			name:        "unrelated multipart route",
+			method:      http.MethodPost,
+			path:        "/system/secrets",
+			contentType: "multipart/form-data; boundary=test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader("body"))
+			req.Header.Set("Content-Type", tt.contentType)
+			rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+			extendArchiveUploadDeadlines(rec, req, 3*time.Minute)
+
+			if !rec.readDeadline.IsZero() {
+				t.Fatalf("expected read deadline to remain unset, got %s", rec.readDeadline)
+			}
+			if !rec.writeDeadline.IsZero() {
+				t.Fatalf("expected write deadline to remain unset, got %s", rec.writeDeadline)
+			}
+		})
 	}
 }
 

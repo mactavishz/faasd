@@ -76,6 +76,35 @@ func Test_SetServiceTimeout(t *testing.T) {
 	}
 }
 
+func Test_SetArchiveUploadTimeout(t *testing.T) {
+	defaultTimeout := "10m5s"
+
+	env := NewEnvBucket()
+	_, providerConfig, err := ReadFromEnv(env)
+	if err != nil {
+		t.Fatalf("unexpected error %s", err)
+	}
+	if providerConfig.ArchiveUploadTimeout.String() != defaultTimeout {
+		t.Fatalf("expected %q, got %q", defaultTimeout, providerConfig.ArchiveUploadTimeout)
+	}
+
+	newTimeout := "3m15s"
+	env.Setenv("archive_upload_timeout", newTimeout)
+	config, providerConfig, err := ReadFromEnv(env)
+	if err != nil {
+		t.Fatalf("unexpected error %s", err)
+	}
+	if providerConfig.ArchiveUploadTimeout.String() != newTimeout {
+		t.Fatalf("expected %q, got %q", newTimeout, providerConfig.ArchiveUploadTimeout)
+	}
+	if config.ReadTimeout.String() != "1m0s" {
+		t.Fatalf("expected service read timeout to remain %q, got %q", "1m0s", config.ReadTimeout)
+	}
+	if config.WriteTimeout.String() != "1m0s" {
+		t.Fatalf("expected service write timeout to remain %q, got %q", "1m0s", config.WriteTimeout)
+	}
+}
+
 func Test_SetPort(t *testing.T) {
 	defaultPort := 8081
 

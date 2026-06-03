@@ -9,6 +9,9 @@ import (
 type ProviderConfig struct {
 	// Sock is the address of the containerd socket
 	Sock string
+
+	// ArchiveUploadTimeout is the longer deadline for archive-backed deploys.
+	ArchiveUploadTimeout time.Duration
 }
 
 // ReadFromEnv loads the FaaSConfig and the Containerd specific config form the env variables
@@ -19,6 +22,7 @@ func ReadFromEnv(hasEnv types.HasEnv) (*types.FaaSConfig, *ProviderConfig, error
 	}
 
 	serviceTimeout := types.ParseIntOrDurationValue(hasEnv.Getenv("service_timeout"), time.Second*60)
+	archiveUploadTimeout := types.ParseIntOrDurationValue(hasEnv.Getenv("archive_upload_timeout"), time.Minute*10+time.Second*5)
 
 	config.ReadTimeout = serviceTimeout
 	config.WriteTimeout = serviceTimeout
@@ -30,7 +34,8 @@ func ReadFromEnv(hasEnv types.HasEnv) (*types.FaaSConfig, *ProviderConfig, error
 	config.TCPPort = &port
 
 	providerConfig := &ProviderConfig{
-		Sock: types.ParseString(hasEnv.Getenv("sock"), "/run/containerd/containerd.sock"),
+		Sock:                 types.ParseString(hasEnv.Getenv("sock"), "/run/containerd/containerd.sock"),
+		ArchiveUploadTimeout: archiveUploadTimeout,
 	}
 
 	return config, providerConfig, nil

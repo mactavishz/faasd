@@ -143,11 +143,11 @@ nameserver 8.8.4.4`), workingDirectoryPermission); err != nil {
 	bootstrapHandlers := types.FaaSHandlers{
 		FunctionProxy:   httpHeaderMiddleware(functionProxy),
 		DeleteFunction:  httpHeaderMiddleware(handlers.MakeDeleteHandler(client, cni, autoScalerController, callGraphController)),
-		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController)),
+		DeployFunction:  httpHeaderMiddleware(handlers.MakeDeployHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController, providerConfig.ArchiveUploadTimeout)),
 		FunctionLister:  httpHeaderMiddleware(handlers.MakeReadHandler(client)),
 		FunctionStatus:  httpHeaderMiddleware(handlers.MakeReplicaReaderHandler(client)),
 		ScaleFunction:   httpHeaderMiddleware(handlers.MakeReplicaUpdateHandler(client, cni, autoScalerController, callGraphController)),
-		UpdateFunction:  httpHeaderMiddleware(handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController)),
+		UpdateFunction:  httpHeaderMiddleware(handlers.MakeUpdateHandler(client, cni, baseUserSecretsPath, alwaysPull, autoScalerController, callGraphController, providerConfig.ArchiveUploadTimeout)),
 		Health:          httpHeaderMiddleware(func(w http.ResponseWriter, r *http.Request) {}),
 		Info:            httpHeaderMiddleware(handlers.MakeInfoHandler(faasd.Version, faasd.GitCommit)),
 		ListNamespaces:  httpHeaderMiddleware(handlers.MakeNamespacesLister(client)),

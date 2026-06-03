@@ -20,7 +20,7 @@ import (
 // MakeUpdateHandler handles PUT /system/functions on the faasd provider.
 // The gateway forwards update requests here, and this handler redeploys the
 // function runtime and refreshes stored metadata/autoscaler state.
-func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController) func(w http.ResponseWriter, r *http.Request) {
+func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath string, alwaysPull bool, autoScalerController *FaasdAutoScalerController, callGraphController *FaasdCallGraphController, archiveUploadTimeout time.Duration) func(w http.ResponseWriter, r *http.Request) {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 
@@ -28,6 +28,8 @@ func MakeUpdateHandler(client *containerd.Client, cni gocni.CNI, secretMountPath
 			http.Error(w, "expected a body", http.StatusBadRequest)
 			return
 		}
+
+		extendArchiveUploadDeadlines(w, r, archiveUploadTimeout)
 
 		defer r.Body.Close()
 
