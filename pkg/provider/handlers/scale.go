@@ -68,6 +68,15 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 			}
 		}
 
+		if shouldDelegateToAutoscaler(req, autoScalerController) {
+			if err := autoScalerController.ScaleUp(namespace, name); err != nil {
+				slog.Info(fmt.Sprintf("[Scale] error deploying %s, error: %s\n", name, err))
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			return
+		}
+
 		ctx := namespaces.WithNamespace(context.Background(), namespace)
 
 		ctr, ctrErr := client.LoadContainer(ctx, name)
@@ -118,13 +127,14 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 
 		if taskExists {
 			if taskStatus != nil {
-				if taskStatus.Status == containerd.Paused {
+				switch taskStatus.Status {
+				case containerd.Paused:
 					if _, err := task.Delete(ctx); err != nil {
 						slog.Info(fmt.Sprintf("[Scale] error deleting paused task %s, error: %s\n", name, err))
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
-				} else if taskStatus.Status == containerd.Stopped {
+				case containerd.Stopped:
 					// Stopped tasks cannot be restarted, must be removed, and created again
 					if _, err := task.Delete(ctx); err != nil {
 						slog.Info(fmt.Sprintf("[Scale] error deleting stopped task %s, error: %s\n", name, err))
@@ -163,4 +173,8 @@ func MakeReplicaUpdateHandler(client *containerd.Client, cni gocni.CNI, autoScal
 			}
 		}
 	}
+}
+
+func shouldDelegateToAutoscaler(req types.ScaleServiceRequest, autoScalerController *FaasdAutoScalerController) bool {
+	return req.Replicas > 0 && autoScalerController != nil && autoScalerController.Enabled()
 }

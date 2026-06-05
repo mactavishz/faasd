@@ -169,6 +169,27 @@ func TestFaasdAutoScaler_EnabledMethodsDelegateToAutoscaler(t *testing.T) {
 	}
 }
 
+func TestShouldDelegateToAutoscalerScaleUp(t *testing.T) {
+	enabled := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, autoscaler.Config{Platform: "faasd", Enabled: true, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}, nil)
+	disabled := NewFaasdAutoScalerController(nil, nil, NewInMemoryFunctionStore(), "/var/openfaas/secrets", false, autoscaler.Config{Platform: "faasd", Enabled: false, DefaultIdleDuration: time.Minute, CheckInterval: time.Hour}, nil)
+
+	if !shouldDelegateToAutoscaler(types.ScaleServiceRequest{Replicas: 1}, enabled) {
+		t.Fatal("expected enabled autoscaler and positive replicas to use autoscaler scale-up path")
+	}
+
+	if shouldDelegateToAutoscaler(types.ScaleServiceRequest{Replicas: 0}, enabled) {
+		t.Fatal("expected scale-to-zero request to keep scale-down path")
+	}
+
+	if shouldDelegateToAutoscaler(types.ScaleServiceRequest{Replicas: 1}, disabled) {
+		t.Fatal("expected disabled autoscaler to keep direct runtime scale path")
+	}
+
+	if shouldDelegateToAutoscaler(types.ScaleServiceRequest{Replicas: 1}, nil) {
+		t.Fatal("expected nil autoscaler to keep direct runtime scale path")
+	}
+}
+
 func TestScaleKeyAndParseScaleKey(t *testing.T) {
 	controller := &FaasdAutoScalerController{}
 
