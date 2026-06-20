@@ -154,6 +154,8 @@ func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold
 	}
 
 	if f.runtimeAvailable(namespace, name) {
+		// Runtime came up (or was already up) without an explicit restore.
+		f.logScaleUp(name, cold, time.Since(start), false)
 		if callgraphController := getCallGraphController(); callgraphController != nil {
 			labels := map[string]string(nil)
 			if stored, ok := f.store.Get(namespace, name); ok {
@@ -169,6 +171,7 @@ func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold
 		return err
 	}
 
+	f.logScaleUp(name, cold, time.Since(start), true)
 	if callGraphController := getCallGraphController(); callGraphController != nil {
 		labels := map[string]string(nil)
 		if stored, ok := f.store.Get(namespace, name); ok {
@@ -179,6 +182,19 @@ func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold
 	}
 
 	return nil
+}
+
+// logScaleUp emits a structured scale-up record. cold=true marks a user-facing
+// (request-path) cold start; cold=false marks a proactive prewarm.
+func (f *FaasdAutoScalerController) logScaleUp(name string, cold bool, duration time.Duration, restored bool) {
+	if f.logger == nil {
+		return
+	}
+	f.logger.Info("scale-up completed",
+		"function", name,
+		"cold", cold,
+		"restored", restored,
+		"duration", duration)
 }
 
 func (f *FaasdAutoScalerController) ScaleDown(namespace, name string) error {

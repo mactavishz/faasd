@@ -340,7 +340,20 @@ func (c *FaasdCallGraphController) StartInvocation(r *http.Request, namespace, f
 		effectiveCaller = caller
 	}
 
-	c.callGraphTracker.RecordEdge(effectiveCaller, functionName, callID, callerExecID, now)
+	// The caller marks async hops with the X-Faas-Async header (set per-call, and
+	// absent on sync hops). Its presence therefore means an async edge; absence
+	// means sync, which is also correct for external entry points (the client
+	// awaits the response).
+	kind := callgraph.EdgeKindSync
+	if strings.TrimSpace(r.Header.Get("X-Faas-Async")) != "" {
+		kind = callgraph.EdgeKindAsync
+	}
+	c.callGraphTracker.RecordEdgeWithKind(effectiveCaller, functionName, callID, callerExecID, now, kind)
+	c.logger.Info("callgraph edge recorded",
+		"caller", effectiveCaller,
+		"callee", functionName,
+		"kind", kind.String(),
+		"callID", callID)
 
 	execID := uuid.New().String()
 	r.Header.Set("X-Exec-Id", execID)
@@ -377,6 +390,9 @@ func (c *FaasdCallGraphController) prewarmDownstream(namespace string, functionN
 	}
 
 	targets := c.callGraphTracker.GetPrewarmTargets(functionName)
+	c.logger.Info("prewarming downstream functions",
+		"caller", functionName,
+		"targetCount", len(targets))
 	for _, target := range targets {
 		c.schedulePrewarm(namespace, target)
 	}
@@ -388,6 +404,9 @@ func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target call
 	}
 
 	if c.autoscaler.runtimeAvailable(namespace, target.FunctionName) {
+		c.logger.Info("skipping prewarm - function already active",
+			"target", target.FunctionName,
+			"kind", target.Kind.String())
 		return
 	}
 
@@ -398,12 +417,29 @@ func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target call
 
 	delay := target.LeadTime - coldStartTime - prewarmSafetyMargin
 	if delay <= 0 {
+		// Prewarm predicted too late: the cold start cannot finish within the
+		// observed lead time.
+		c.logger.Info("prewarm predicted too late (firing immediately)",
+			"target", target.FunctionName,
+			"kind", target.Kind.String(),
+			"leadTime", target.LeadTime,
+			"coldStartTime", coldStartTime,
+			"delay", delay)
 		go c.executePrewarm(namespace, target.FunctionName)
 		return
 	}
 
+	c.logger.Info("scheduling prewarm",
+		"target", target.FunctionName,
+		"kind", target.Kind.String(),
+		"leadTime", target.LeadTime,
+		"coldStartTime", coldStartTime,
+		"delay", delay)
+
 	time.AfterFunc(delay, func() {
 		if c.autoscaler.runtimeAvailable(namespace, target.FunctionName) {
+			c.logger.Info("skipping scheduled prewarm - function became active",
+				"target", target.FunctionName)
 			return
 		}
 		c.executePrewarm(namespace, target.FunctionName)
@@ -415,10 +451,14 @@ func (c *FaasdCallGraphController) executePrewarm(namespace, functionName string
 		return
 	}
 
+	start := time.Now()
 	if err := c.autoscaler.ScaleUpWithMode(namespace, functionName, false); err != nil {
-		c.logger.Debug("prewarm scale-up failed", "function", functionName, "err", err)
+		c.logger.Warn("prewarm scale-up failed", "function", functionName, "err", err)
 		return
 	}
+	c.logger.Info("prewarm downstream function completed",
+		"function", functionName,
+		"duration", time.Since(start))
 }
 
 func RegisterCallGraphFunction(client *containerd.Client, namespace, name string, labels map[string]string) {
