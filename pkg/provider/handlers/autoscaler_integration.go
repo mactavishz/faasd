@@ -132,15 +132,23 @@ func (f *FaasdAutoScalerController) RecordActivity(namespace, name string) {
 }
 
 func (f *FaasdAutoScalerController) ScaleUp(namespace, name string) error {
-	return f.ScaleUpWithMode(namespace, name, true)
+	_, err := f.ScaleUpWithMode(namespace, name, true)
+	return err
 }
 
-func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold bool) error {
+// ScaleUpWithMode ensures a function's runtime is available and reports whether
+// THIS call performed the scaled-down -> active transition. A demand-driven cold
+// start (cold=true) blocks until ready; a speculative prewarm (cold=false) is
+// opportunistic and returns immediately if another caller is already scaling the
+// function, so it never occupies a prewarm slot waiting on work it did not
+// initiate. Only the caller that performed the transition records the scale-up
+// (with its own mode) and restores the runtime if needed.
+func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold bool) (bool, error) {
 	if f == nil {
-		return fmt.Errorf("autoscaler controller not configured")
+		return false, fmt.Errorf("autoscaler controller not configured")
 	}
 	if !f.Enabled() {
-		return nil
+		return false, nil
 	}
 
 	// On a request-path cold start (cold=true), the caller's own scale-up is
@@ -155,44 +163,59 @@ func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold
 	}
 
 	start := time.Now()
+	key := f.scaleKey(namespace, name)
+	var performed bool
+	var err error
+	if cold {
+		performed, err = f.autoScaler.ScaleUpWhenReady(key)
+	} else {
+		performed, err = f.autoScaler.TryScaleUp(key)
+	}
+	if err != nil {
+		return false, err
+	}
 
-	if err := f.autoScaler.ScaleUpWhenReady(f.scaleKey(namespace, name)); err != nil {
-		return err
+	// Another caller (demand or another prewarm) is already driving this
+	// function's scale-up, or it is already active: there is nothing for this
+	// caller to record or restore.
+	if !performed {
+		return false, nil
 	}
 
 	if f.client == nil {
-		return nil
+		return true, nil
 	}
 
 	if f.runtimeAvailable(namespace, name) {
 		// Runtime came up (or was already up) without an explicit restore.
-		f.logScaleUp(name, cold, time.Since(start), false)
-		if callgraphController := getCallGraphController(); callgraphController != nil {
-			labels := map[string]string(nil)
-			if stored, ok := f.store.Get(namespace, name); ok {
-				labels = stored.Labels
-			}
-			callgraphController.recordScaleUp(name, time.Since(start), cold)
-			RegisterCallGraphFunction(f.client, namespace, name, labels)
-		}
-		return nil
+		f.recordScaleUpResult(namespace, name, cold, time.Since(start), false)
+		return true, nil
 	}
 
 	if err := f.restoreRuntime(namespace, name); err != nil {
-		return err
+		return true, err
 	}
 
-	f.logScaleUp(name, cold, time.Since(start), true)
-	if callGraphController := getCallGraphController(); callGraphController != nil {
+	f.recordScaleUpResult(namespace, name, cold, time.Since(start), true)
+	return true, nil
+}
+
+// recordScaleUpResult logs and records a completed scale-up. It is called only by
+// the caller that performed the transition, so the duration sample reflects the
+// real scale-up and is attributed to the correct mode (cold vs prewarm).
+func (f *FaasdAutoScalerController) recordScaleUpResult(namespace, name string, cold bool, duration time.Duration, restored bool) {
+	if f.client == nil {
+		return
+	}
+	f.logScaleUp(name, cold, duration, restored)
+	if cg := getCallGraphController(); cg != nil {
+		cg.recordScaleUp(name, duration, cold)
 		labels := map[string]string(nil)
 		if stored, ok := f.store.Get(namespace, name); ok {
 			labels = stored.Labels
 		}
-		callGraphController.recordScaleUp(name, time.Since(start), cold)
 		RegisterCallGraphFunction(f.client, namespace, name, labels)
 	}
-
-	return nil
 }
 
 // logScaleUp emits a structured scale-up record. cold=true marks a user-facing

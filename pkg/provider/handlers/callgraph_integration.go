@@ -64,6 +64,11 @@ type FaasdCallGraphController struct {
 	// prewarmSem bounds concurrent speculative prewarm scale-ups so they cannot
 	// starve request-path cold starts (best-effort, non-blocking).
 	prewarmSem chan struct{}
+
+	// prewarmInFlight collapses duplicate prewarm attempts for the same target
+	// (e.g. eager + scheduled) so they do not each consume a global prewarm slot
+	// for what the autoscaler coalesces into a single scale-up.
+	prewarmInFlight sync.Map
 }
 
 var (
@@ -371,7 +376,21 @@ func (c *FaasdCallGraphController) StartInvocation(r *http.Request, namespace, f
 	if strings.TrimSpace(r.Header.Get("X-Faas-Async")) != "" {
 		kind = callgraph.EdgeKindAsync
 	}
-	c.callGraphTracker.RecordEdgeWithKind(effectiveCaller, functionName, callID, callerExecID, now, kind)
+
+	// Use the gateway arrival time (X-Faas-Arrival, host-clock ms) as the edge
+	// timestamp, not `now`. By the time this runs the gateway has already scaled
+	// the callee from zero, so `now` would bake the callee's cold start into the
+	// lead time; the gateway stamps arrival before that, yielding a clean
+	// caller->call-issue gap (matching tinyFaaS). Set by the gateway, so the
+	// function workload needs no instrumentation. Falls back to `now` when the
+	// header is absent (e.g. external entry points). StartExecution keeps `now`
+	// because that marks when this function begins executing, which is the
+	// correct reference for *its* downstream edges.
+	edgeTime := now
+	if arrival := parseArrival(r.Header.Get("X-Faas-Arrival")); !arrival.IsZero() {
+		edgeTime = arrival
+	}
+	c.callGraphTracker.RecordEdgeWithKind(effectiveCaller, functionName, callID, callerExecID, edgeTime, kind)
 	c.logger.Info("callgraph edge recorded",
 		"caller", effectiveCaller,
 		"callee", functionName,
@@ -465,16 +484,11 @@ func (c *FaasdCallGraphController) prewarmDownstreamEager(namespace, functionNam
 			continue
 		}
 
-		// In faasd the recorded lead time is inflated by the callee's own cold
-		// start, because the gateway scales the callee from zero before the
-		// provider stamps the edge. Recover the true caller->call-issue gap by
-		// subtracting the callee cold start, so the timing math matches tinyFaaS
-		// (whose lead time is already the clean gap).
-		gap := recoverGap(target.LeadTime, target.AvgColdStartDuration)
-
-		// The caller's own cold start is extra lead time on top of the edge gap:
-		// delay = callerColdStart + gap - calleeColdStart - margin.
-		delay := target.CallerColdStartDuration + gap - target.AvgColdStartDuration - prewarmSafetyMargin
+		// The lead time is now the clean caller->call-issue gap (edge stamped at
+		// the caller's call-issue time). The caller's own cold start is extra lead
+		// time on top of that gap:
+		// delay = callerColdStart + leadTime - calleeColdStart - margin.
+		delay := target.CallerColdStartDuration + target.LeadTime - target.AvgColdStartDuration - prewarmSafetyMargin
 
 		if delay <= 0 {
 			// Cannot be ready by waiting -- warm it now.
@@ -489,7 +503,6 @@ func (c *FaasdCallGraphController) prewarmDownstreamEager(namespace, functionNam
 			"target", target.FunctionName,
 			"callerColdStart", target.CallerColdStartDuration,
 			"leadTime", target.LeadTime,
-			"gap", gap,
 			"calleeColdStart", target.AvgColdStartDuration,
 			"delay", delay)
 		tname := target.FunctionName
@@ -502,38 +515,28 @@ func (c *FaasdCallGraphController) prewarmDownstreamEager(namespace, functionNam
 	}
 }
 
-// recoverGap returns the caller->call-issue gap from a recorded lead time. In
-// faasd the gateway scales the callee from zero before the provider records the
-// edge, so the recorded lead time is inflated by the callee's cold start;
-// subtracting it recovers the true gap (clamped at zero). This makes faasd's
-// prewarm timing equivalent to tinyFaaS, whose lead time is stamped at call
-// arrival and is therefore already the clean gap.
-func recoverGap(leadTime, calleeColdStart time.Duration) time.Duration {
-	gap := leadTime - calleeColdStart
-	if gap < 0 {
-		return 0
+// parseArrival decodes the X-Faas-Arrival header (host-clock milliseconds since
+// the Unix epoch, stamped by the gateway) into a time. Returns the zero time if
+// absent/invalid.
+func parseArrival(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
 	}
-	return gap
+	ms, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || ms <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms)
 }
 
-// startEagerPrewarm executes an eager prewarm under the concurrency budget. It is
-// best-effort: if the budget is exhausted it skips rather than queues, so
-// speculative work never competes with request-path cold starts.
+// startEagerPrewarm kicks off an eager prewarm. Admission control (the shared
+// prewarm budget) is enforced in executePrewarm, so eager and scheduled prewarms
+// compete for the same global budget.
 func (c *FaasdCallGraphController) startEagerPrewarm(namespace, caller, target string, delay time.Duration, scheduled bool) {
-	select {
-	case c.prewarmSem <- struct{}{}:
-	default:
-		c.logger.Info("skipping eager prewarm - budget exhausted",
-			"caller", caller, "target", target)
-		return
-	}
-
-	go func() {
-		defer func() { <-c.prewarmSem }()
-		c.logger.Info("eager prewarm during cold start",
-			"caller", caller, "target", target, "delay", delay, "scheduled", scheduled)
-		c.executePrewarm(namespace, target)
-	}()
+	c.logger.Info("eager prewarm during cold start",
+		"caller", caller, "target", target, "delay", delay, "scheduled", scheduled)
+	go c.executePrewarm(namespace, target)
 }
 
 func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target callgraph.PrewarmTarget) {
@@ -553,11 +556,9 @@ func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target call
 		coldStartTime = stats.AvgColdStartDuration
 	}
 
-	// Recover the true caller->call-issue gap (see recoverGap): the recorded lead
-	// time includes the callee's own cold start in faasd. The caller is already
-	// warm on this path, so delay = gap - calleeColdStart - margin.
-	gap := recoverGap(target.LeadTime, coldStartTime)
-	delay := gap - coldStartTime - prewarmSafetyMargin
+	// The lead time is the clean caller->call-issue gap. The caller is already
+	// warm on this path, so delay = leadTime - calleeColdStart - margin.
+	delay := target.LeadTime - coldStartTime - prewarmSafetyMargin
 	if delay <= 0 {
 		// The cold start cannot finish within the observed lead time, so firing
 		// now would not make the function ready in time -- it would only add
@@ -569,7 +570,6 @@ func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target call
 			"target", target.FunctionName,
 			"kind", target.Kind.String(),
 			"leadTime", target.LeadTime,
-			"gap", gap,
 			"coldStartTime", coldStartTime,
 			"delay", delay)
 		return
@@ -579,7 +579,6 @@ func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target call
 		"target", target.FunctionName,
 		"kind", target.Kind.String(),
 		"leadTime", target.LeadTime,
-		"gap", gap,
 		"coldStartTime", coldStartTime,
 		"delay", delay)
 
@@ -598,9 +597,36 @@ func (c *FaasdCallGraphController) executePrewarm(namespace, functionName string
 		return
 	}
 
+	// Per-target admission first: if a prewarm for this function is already in
+	// flight, skip -- otherwise duplicate attempts (eager + scheduled) would each
+	// take a global slot for a scale-up the autoscaler coalesces into one.
+	if _, inFlight := c.prewarmInFlight.LoadOrStore(functionName, struct{}{}); inFlight {
+		return
+	}
+	defer c.prewarmInFlight.Delete(functionName)
+
+	// Global admission control for all speculative prewarms (eager and scheduled
+	// alike). Best-effort: if the budget is exhausted, skip rather than queue, so
+	// speculative work never competes with request-path cold starts. Request-path
+	// cold starts (ScaleUpWithMode with cold=true) do not go through here and are
+	// never throttled.
+	select {
+	case c.prewarmSem <- struct{}{}:
+	default:
+		c.logger.Info("skipping prewarm - budget exhausted", "function", functionName)
+		return
+	}
+	defer func() { <-c.prewarmSem }()
+
 	start := time.Now()
-	if err := c.autoscaler.ScaleUpWithMode(namespace, functionName, false); err != nil {
+	performed, err := c.autoscaler.ScaleUpWithMode(namespace, functionName, false)
+	if err != nil {
 		c.logger.Warn("prewarm scale-up failed", "function", functionName, "err", err)
+		return
+	}
+	if !performed {
+		// Another caller was already scaling this function (demand or another
+		// prewarm); nothing was done, so do not log a completion.
 		return
 	}
 	c.logger.Info("prewarm downstream function completed",
