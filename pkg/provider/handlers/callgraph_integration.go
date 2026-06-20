@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +19,21 @@ import (
 )
 
 const prewarmSafetyMargin = 50 * time.Millisecond
+
+// defaultMaxConcurrentPrewarms bounds how many speculative prewarm scale-ups may
+// run at once. Prewarming is best-effort: when the budget is exhausted, targets
+// are skipped rather than queued, so speculative work never piles up against
+// request-path cold starts. Overridable via FAASD_MAX_CONCURRENT_PREWARMS.
+const defaultMaxConcurrentPrewarms = 3
+
+func maxConcurrentPrewarms() int {
+	if v := strings.TrimSpace(os.Getenv("FAASD_MAX_CONCURRENT_PREWARMS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxConcurrentPrewarms
+}
 
 type callgraphRoute struct {
 	namespace        string
@@ -42,6 +60,10 @@ type FaasdCallGraphController struct {
 	routingTable        map[string]*callgraphRoute
 	reverseRoutingTable map[string]string
 	invocationTable     sync.Map
+
+	// prewarmSem bounds concurrent speculative prewarm scale-ups so they cannot
+	// starve request-path cold starts (best-effort, non-blocking).
+	prewarmSem chan struct{}
 }
 
 var (
@@ -61,6 +83,7 @@ func NewFaasdCallGraphController(autoscaler *FaasdAutoScalerController, client *
 		logger:              logger,
 		routingTable:        make(map[string]*callgraphRoute),
 		reverseRoutingTable: make(map[string]string),
+		prewarmSem:          make(chan struct{}, maxConcurrentPrewarms()),
 	}
 
 	controller.callGraphTracker = callgraph.New(
@@ -398,6 +421,121 @@ func (c *FaasdCallGraphController) prewarmDownstream(namespace string, functionN
 	}
 }
 
+// prewarmDownstreamEager warms the predicted SYNCHRONOUS downstream functions of
+// a caller that is itself cold-starting on the request path. Unlike
+// schedulePrewarm it fires immediately instead of computing a delay against the
+// recorded lead time: the caller's in-progress cold start is the lead time, and
+// it is far larger than the tiny gap before the caller issues its first sync
+// call (which is why those prewarms otherwise land "too late"). Asynchronous
+// callees are skipped -- the caller does not block on them, so warming them here
+// would only add contention to the caller's own in-flight cold start. Warms are
+// bounded by prewarmSem and skipped (not queued) when exhausted. Fire-and-forget.
+func (c *FaasdCallGraphController) prewarmDownstreamEager(namespace, functionName string) {
+	if !c.Enabled() || c.autoscaler == nil || !c.autoscaler.Enabled() || !c.callGraphTracker.PrewarmEnabled() {
+		return
+	}
+
+	targets := c.callGraphTracker.GetPrewarmTargets(functionName)
+	if len(targets) == 0 {
+		return
+	}
+
+	// Synchronous callees first (on the critical path), then the most imminent
+	// (smallest lead time) first.
+	sort.SliceStable(targets, func(i, j int) bool {
+		si := targets[i].Kind == callgraph.EdgeKindSync
+		sj := targets[j].Kind == callgraph.EdgeKindSync
+		if si != sj {
+			return si
+		}
+		return targets[i].LeadTime < targets[j].LeadTime
+	})
+
+	for _, target := range targets {
+		// Skip async callees (off the caller's user-visible critical path). They
+		// are cold-started on their own dispatch path. EdgeKindUnknown is treated
+		// as potentially-critical and kept.
+		if target.Kind == callgraph.EdgeKindAsync {
+			continue
+		}
+		if !c.isCallgraphEnabled(namespace, target.FunctionName) {
+			continue
+		}
+		if c.autoscaler.runtimeAvailable(namespace, target.FunctionName) {
+			continue
+		}
+
+		// In faasd the recorded lead time is inflated by the callee's own cold
+		// start, because the gateway scales the callee from zero before the
+		// provider stamps the edge. Recover the true caller->call-issue gap by
+		// subtracting the callee cold start, so the timing math matches tinyFaaS
+		// (whose lead time is already the clean gap).
+		gap := recoverGap(target.LeadTime, target.AvgColdStartDuration)
+
+		// The caller's own cold start is extra lead time on top of the edge gap:
+		// delay = callerColdStart + gap - calleeColdStart - margin.
+		delay := target.CallerColdStartDuration + gap - target.AvgColdStartDuration - prewarmSafetyMargin
+
+		if delay <= 0 {
+			// Cannot be ready by waiting -- warm it now.
+			c.startEagerPrewarm(namespace, functionName, target.FunctionName, delay, false)
+			continue
+		}
+
+		// Enough runway to warm just in time. Schedule it, acquiring the budget at
+		// fire time (not now) so the slot is not held during the wait.
+		c.logger.Info("scheduling eager prewarm",
+			"caller", functionName,
+			"target", target.FunctionName,
+			"callerColdStart", target.CallerColdStartDuration,
+			"leadTime", target.LeadTime,
+			"gap", gap,
+			"calleeColdStart", target.AvgColdStartDuration,
+			"delay", delay)
+		tname := target.FunctionName
+		time.AfterFunc(delay, func() {
+			if c.autoscaler.runtimeAvailable(namespace, tname) {
+				return
+			}
+			c.startEagerPrewarm(namespace, functionName, tname, delay, true)
+		})
+	}
+}
+
+// recoverGap returns the caller->call-issue gap from a recorded lead time. In
+// faasd the gateway scales the callee from zero before the provider records the
+// edge, so the recorded lead time is inflated by the callee's cold start;
+// subtracting it recovers the true gap (clamped at zero). This makes faasd's
+// prewarm timing equivalent to tinyFaaS, whose lead time is stamped at call
+// arrival and is therefore already the clean gap.
+func recoverGap(leadTime, calleeColdStart time.Duration) time.Duration {
+	gap := leadTime - calleeColdStart
+	if gap < 0 {
+		return 0
+	}
+	return gap
+}
+
+// startEagerPrewarm executes an eager prewarm under the concurrency budget. It is
+// best-effort: if the budget is exhausted it skips rather than queues, so
+// speculative work never competes with request-path cold starts.
+func (c *FaasdCallGraphController) startEagerPrewarm(namespace, caller, target string, delay time.Duration, scheduled bool) {
+	select {
+	case c.prewarmSem <- struct{}{}:
+	default:
+		c.logger.Info("skipping eager prewarm - budget exhausted",
+			"caller", caller, "target", target)
+		return
+	}
+
+	go func() {
+		defer func() { <-c.prewarmSem }()
+		c.logger.Info("eager prewarm during cold start",
+			"caller", caller, "target", target, "delay", delay, "scheduled", scheduled)
+		c.executePrewarm(namespace, target)
+	}()
+}
+
 func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target callgraph.PrewarmTarget) {
 	if !c.isCallgraphEnabled(namespace, target.FunctionName) {
 		return
@@ -415,17 +553,25 @@ func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target call
 		coldStartTime = stats.AvgColdStartDuration
 	}
 
-	delay := target.LeadTime - coldStartTime - prewarmSafetyMargin
+	// Recover the true caller->call-issue gap (see recoverGap): the recorded lead
+	// time includes the callee's own cold start in faasd. The caller is already
+	// warm on this path, so delay = gap - calleeColdStart - margin.
+	gap := recoverGap(target.LeadTime, coldStartTime)
+	delay := gap - coldStartTime - prewarmSafetyMargin
 	if delay <= 0 {
-		// Prewarm predicted too late: the cold start cannot finish within the
-		// observed lead time.
-		c.logger.Info("prewarm predicted too late (firing immediately)",
+		// The cold start cannot finish within the observed lead time, so firing
+		// now would not make the function ready in time -- it would only add
+		// container-start contention while racing (and losing to) the on-demand
+		// cold start. Skip it. The eager cold-start path (prewarmDownstreamEager)
+		// covers these tight critical-path lead times by warming the caller's
+		// synchronous downstream while the caller itself is still cold-starting.
+		c.logger.Info("skipping prewarm - predicted too late",
 			"target", target.FunctionName,
 			"kind", target.Kind.String(),
 			"leadTime", target.LeadTime,
+			"gap", gap,
 			"coldStartTime", coldStartTime,
 			"delay", delay)
-		go c.executePrewarm(namespace, target.FunctionName)
 		return
 	}
 
@@ -433,6 +579,7 @@ func (c *FaasdCallGraphController) schedulePrewarm(namespace string, target call
 		"target", target.FunctionName,
 		"kind", target.Kind.String(),
 		"leadTime", target.LeadTime,
+		"gap", gap,
 		"coldStartTime", coldStartTime,
 		"delay", delay)
 

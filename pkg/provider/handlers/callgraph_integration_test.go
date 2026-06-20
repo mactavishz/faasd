@@ -80,3 +80,42 @@ func TestExtractCaller_ExecutionContextFallback(t *testing.T) {
 		t.Fatal("expected async caller to be callgraph-enabled")
 	}
 }
+
+func TestStartInvocation_RecordsEdgeKindFromAsyncHeader(t *testing.T) {
+	cfg := *callgraph.DefaultConfig()
+	controller := NewFaasdCallGraphController(nil, nil, NewInMemoryFunctionStore(), cfg, nil)
+
+	controller.upsertFunction("openfaas-fn", "iot-cw", nil, "10.62.0.41", true)
+	controller.upsertFunction("openfaas-fn", "iot-ca", nil, "10.62.0.42", true)
+
+	// Sync hop: caller omits the X-Faas-Async header.
+	syncReq, err := http.NewRequest(http.MethodPost, "http://provider/function/iot-cw", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.StartInvocation(syncReq, "openfaas-fn", "iot-cw")
+
+	// Async hop: caller marks it with X-Faas-Async.
+	asyncReq, err := http.NewRequest(http.MethodPost, "http://provider/function/iot-ca", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asyncReq.Header.Set("X-Faas-Async", "true")
+	controller.StartInvocation(asyncReq, "openfaas-fn", "iot-ca")
+
+	cwEdge, ok := controller.callGraphTracker.GetEdgeStats("", "iot-cw")
+	if !ok {
+		t.Fatal("expected an edge recorded for iot-cw")
+	}
+	if cwEdge.Kind != callgraph.EdgeKindSync {
+		t.Fatalf("iot-cw: expected sync edge (no header), got %s", cwEdge.Kind)
+	}
+
+	caEdge, ok := controller.callGraphTracker.GetEdgeStats("", "iot-ca")
+	if !ok {
+		t.Fatal("expected an edge recorded for iot-ca")
+	}
+	if caEdge.Kind != callgraph.EdgeKindAsync {
+		t.Fatalf("iot-ca: expected async edge (X-Faas-Async set), got %s", caEdge.Kind)
+	}
+}

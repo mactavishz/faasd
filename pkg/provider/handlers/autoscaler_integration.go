@@ -143,6 +143,17 @@ func (f *FaasdAutoScalerController) ScaleUpWithMode(namespace, name string, cold
 		return nil
 	}
 
+	// On a request-path cold start (cold=true), the caller's own scale-up is
+	// otherwise-idle time we can use to warm its predicted synchronous downstream
+	// functions, so they are ready (or nearly so) by the time the caller
+	// dispatches to them. Fire this before blocking on ScaleUpWhenReady. Prewarms
+	// (cold=false) are excluded to avoid recursion.
+	if cold {
+		if cg := getCallGraphController(); cg != nil {
+			go cg.prewarmDownstreamEager(namespace, name)
+		}
+	}
+
 	start := time.Now()
 
 	if err := f.autoScaler.ScaleUpWhenReady(f.scaleKey(namespace, name)); err != nil {
